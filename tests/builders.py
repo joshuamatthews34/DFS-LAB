@@ -33,6 +33,10 @@ GAME_INFO = {"DAL": "DAL@NYG 09/14/2026 01:00PM ET", "NYG": "DAL@NYG 09/14/2026 
              "SEA": "SEA@ARI 09/14/2026 04:25PM ET", "ARI": "SEA@ARI 09/14/2026 04:25PM ET"}
 
 
+# A realistic right-skewed shape: percentile = projection x multiplier (the mean is the projection).
+PERCENTILE_SHAPE = {25: 0.6, 50: 0.9, 75: 1.3, 85: 1.55, 95: 2.0, 99: 2.6}
+
+
 def sabersim_csv(path, players, blend=True, actuals=True, backslash=True, drop=()):
     extra = ["dk_std", "FD ID", "FD Salary"]
     header = [c for c in REQUIRED if c not in drop] + extra
@@ -45,8 +49,8 @@ def sabersim_csv(path, players, blend=True, actuals=True, backslash=True, drop=(
             "My Own": 10.5, "Adj Own": 11.0, "Min Exp": 0, "Max Exp": 100, "Saber Team": 24.5,
             "Saber Total": 47.5, "dk_points": ss, "dk_std": 7.1, "FD ID": "x", "FD Salary": 1,
         }
-        for i, p in enumerate((25, 50, 75, 85, 95, 99)):
-            v[f"dk_{p}_percentile"] = round(ss * (0.5 + 0.25 * i), 2)
+        for p, mult in PERCENTILE_SHAPE.items():
+            v[f"dk_{p}_percentile"] = round(ss * mult, 2)
         out.append([v.get(c, "") for c in header])
     _write_csv(path, out)
 

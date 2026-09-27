@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS season_results (
     slate_id TEXT, contest_id TEXT, build_key TEXT, method TEXT, name TEXT, refill INTEGER,
     lineups INTEGER, top1 INTEGER, top5 INTEGER, cashed INTEGER, won REAL, fees REAL, graded_at TEXT,
     PRIMARY KEY (slate_id, contest_id, build_key));
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS warroom_tags (
     slate_id TEXT, source_file TEXT, player TEXT, name_key TEXT, tag TEXT,
     cap_min REAL, cap_max REAL, dfs_id INTEGER);

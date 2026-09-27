@@ -1,0 +1,670 @@
+{
+ "source": "nflverse weekly player and team stats, regular season",
+ "seasons": [
+  2021,
+  2022,
+  2023,
+  2024,
+  2025
+ ],
+ "team_weeks": 2718,
+ "estimated_on": "2026-09-27",
+ "method": "Spearman rank correlation of DraftKings points by role, converted with r = 2 sin(pi*rho/6)",
+ "roles": {
+  "QB1": "most pass attempts",
+  "RB1/RB2": "most carries + targets",
+  "WR1-WR3, TE1": "most targets",
+  "K": "most kick attempts",
+  "DST": "team defense and special teams"
+ },
+ "pairs": [
+  {
+   "a": "QB1",
+   "b": "QB1",
+   "relation": "opp",
+   "r": 0.175,
+   "rho": 0.168,
+   "n": 1355
+  },
+  {
+   "a": "QB1",
+   "b": "RB1",
+   "relation": "same",
+   "r": 0.103,
+   "rho": 0.098,
+   "n": 2714
+  },
+  {
+   "a": "QB1",
+   "b": "RB1",
+   "relation": "opp",
+   "r": 0.055,
+   "rho": 0.052,
+   "n": 1357
+  },
+  {
+   "a": "QB1",
+   "b": "RB2",
+   "relation": "same",
+   "r": 0.069,
+   "rho": 0.066,
+   "n": 2695
+  },
+  {
+   "a": "QB1",
+   "b": "RB2",
+   "relation": "opp",
+   "r": -0.014,
+   "rho": -0.013,
+   "n": 1347
+  },
+  {
+   "a": "QB1",
+   "b": "WR1",
+   "relation": "same",
+   "r": 0.466,
+   "rho": 0.449,
+   "n": 2714
+  },
+  {
+   "a": "QB1",
+   "b": "WR1",
+   "relation": "opp",
+   "r": 0.102,
+   "rho": 0.097,
+   "n": 1357
+  },
+  {
+   "a": "QB1",
+   "b": "WR2",
+   "relation": "same",
+   "r": 0.375,
+   "rho": 0.361,
+   "n": 2714
+  },
+  {
+   "a": "QB1",
+   "b": "WR2",
+   "relation": "opp",
+   "r": 0.095,
+   "rho": 0.09,
+   "n": 1357
+  },
+  {
+   "a": "QB1",
+   "b": "WR3",
+   "relation": "same",
+   "r": 0.289,
+   "rho": 0.277,
+   "n": 2694
+  },
+  {
+   "a": "QB1",
+   "b": "WR3",
+   "relation": "opp",
+   "r": 0.092,
+   "rho": 0.088,
+   "n": 1347
+  },
+  {
+   "a": "QB1",
+   "b": "TE1",
+   "relation": "same",
+   "r": 0.306,
+   "rho": 0.294,
+   "n": 2707
+  },
+  {
+   "a": "QB1",
+   "b": "TE1",
+   "relation": "opp",
+   "r": 0.08,
+   "rho": 0.076,
+   "n": 1353
+  },
+  {
+   "a": "QB1",
+   "b": "K",
+   "relation": "same",
+   "r": 0.114,
+   "rho": 0.109,
+   "n": 2708
+  },
+  {
+   "a": "QB1",
+   "b": "K",
+   "relation": "opp",
+   "r": -0.076,
+   "rho": -0.073,
+   "n": 1354
+  },
+  {
+   "a": "QB1",
+   "b": "DST",
+   "relation": "same",
+   "r": -0.045,
+   "rho": -0.043,
+   "n": 2714
+  },
+  {
+   "a": "QB1",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.44,
+   "rho": -0.424,
+   "n": 1357
+  },
+  {
+   "a": "RB1",
+   "b": "RB1",
+   "relation": "opp",
+   "r": -0.075,
+   "rho": -0.071,
+   "n": 1359
+  },
+  {
+   "a": "RB1",
+   "b": "RB2",
+   "relation": "same",
+   "r": -0.019,
+   "rho": -0.018,
+   "n": 2699
+  },
+  {
+   "a": "RB1",
+   "b": "RB2",
+   "relation": "opp",
+   "r": -0.095,
+   "rho": -0.091,
+   "n": 1349
+  },
+  {
+   "a": "RB1",
+   "b": "WR1",
+   "relation": "same",
+   "r": 0.006,
+   "rho": 0.006,
+   "n": 2718
+  },
+  {
+   "a": "RB1",
+   "b": "WR1",
+   "relation": "opp",
+   "r": -0.023,
+   "rho": -0.022,
+   "n": 1359
+  },
+  {
+   "a": "RB1",
+   "b": "WR2",
+   "relation": "same",
+   "r": 0.014,
+   "rho": 0.014,
+   "n": 2718
+  },
+  {
+   "a": "RB1",
+   "b": "WR2",
+   "relation": "opp",
+   "r": 0.007,
+   "rho": 0.007,
+   "n": 1359
+  },
+  {
+   "a": "RB1",
+   "b": "WR3",
+   "relation": "same",
+   "r": -0.038,
+   "rho": -0.036,
+   "n": 2698
+  },
+  {
+   "a": "RB1",
+   "b": "WR3",
+   "relation": "opp",
+   "r": 0.069,
+   "rho": 0.066,
+   "n": 1349
+  },
+  {
+   "a": "RB1",
+   "b": "TE1",
+   "relation": "same",
+   "r": -0.01,
+   "rho": -0.01,
+   "n": 2711
+  },
+  {
+   "a": "RB1",
+   "b": "TE1",
+   "relation": "opp",
+   "r": 0.034,
+   "rho": 0.033,
+   "n": 1355
+  },
+  {
+   "a": "RB1",
+   "b": "K",
+   "relation": "same",
+   "r": 0.189,
+   "rho": 0.181,
+   "n": 2712
+  },
+  {
+   "a": "RB1",
+   "b": "K",
+   "relation": "opp",
+   "r": -0.106,
+   "rho": -0.102,
+   "n": 1356
+  },
+  {
+   "a": "RB1",
+   "b": "DST",
+   "relation": "same",
+   "r": 0.092,
+   "rho": 0.088,
+   "n": 2718
+  },
+  {
+   "a": "RB1",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.322,
+   "rho": -0.309,
+   "n": 1359
+  },
+  {
+   "a": "RB2",
+   "b": "RB2",
+   "relation": "opp",
+   "r": -0.068,
+   "rho": -0.065,
+   "n": 1341
+  },
+  {
+   "a": "RB2",
+   "b": "WR1",
+   "relation": "same",
+   "r": -0.02,
+   "rho": -0.019,
+   "n": 2699
+  },
+  {
+   "a": "RB2",
+   "b": "WR1",
+   "relation": "opp",
+   "r": 0.003,
+   "rho": 0.003,
+   "n": 1349
+  },
+  {
+   "a": "RB2",
+   "b": "WR2",
+   "relation": "same",
+   "r": -0.034,
+   "rho": -0.033,
+   "n": 2699
+  },
+  {
+   "a": "RB2",
+   "b": "WR2",
+   "relation": "opp",
+   "r": -0.021,
+   "rho": -0.02,
+   "n": 1349
+  },
+  {
+   "a": "RB2",
+   "b": "WR3",
+   "relation": "same",
+   "r": -0.015,
+   "rho": -0.014,
+   "n": 2679
+  },
+  {
+   "a": "RB2",
+   "b": "WR3",
+   "relation": "opp",
+   "r": -0.005,
+   "rho": -0.005,
+   "n": 1340
+  },
+  {
+   "a": "RB2",
+   "b": "TE1",
+   "relation": "same",
+   "r": -0.006,
+   "rho": -0.006,
+   "n": 2692
+  },
+  {
+   "a": "RB2",
+   "b": "TE1",
+   "relation": "opp",
+   "r": -0.025,
+   "rho": -0.024,
+   "n": 1346
+  },
+  {
+   "a": "RB2",
+   "b": "K",
+   "relation": "same",
+   "r": 0.044,
+   "rho": 0.042,
+   "n": 2693
+  },
+  {
+   "a": "RB2",
+   "b": "K",
+   "relation": "opp",
+   "r": -0.093,
+   "rho": -0.089,
+   "n": 1346
+  },
+  {
+   "a": "RB2",
+   "b": "DST",
+   "relation": "same",
+   "r": 0.035,
+   "rho": 0.034,
+   "n": 2699
+  },
+  {
+   "a": "RB2",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.142,
+   "rho": -0.135,
+   "n": 1349
+  },
+  {
+   "a": "WR1",
+   "b": "WR1",
+   "relation": "opp",
+   "r": 0.094,
+   "rho": 0.09,
+   "n": 1359
+  },
+  {
+   "a": "WR1",
+   "b": "WR2",
+   "relation": "same",
+   "r": 0.196,
+   "rho": 0.187,
+   "n": 2718
+  },
+  {
+   "a": "WR1",
+   "b": "WR2",
+   "relation": "opp",
+   "r": 0.074,
+   "rho": 0.071,
+   "n": 1359
+  },
+  {
+   "a": "WR1",
+   "b": "WR3",
+   "relation": "same",
+   "r": 0.097,
+   "rho": 0.092,
+   "n": 2698
+  },
+  {
+   "a": "WR1",
+   "b": "WR3",
+   "relation": "opp",
+   "r": 0.066,
+   "rho": 0.064,
+   "n": 1349
+  },
+  {
+   "a": "WR1",
+   "b": "TE1",
+   "relation": "same",
+   "r": 0.004,
+   "rho": 0.004,
+   "n": 2711
+  },
+  {
+   "a": "WR1",
+   "b": "TE1",
+   "relation": "opp",
+   "r": 0.047,
+   "rho": 0.045,
+   "n": 1355
+  },
+  {
+   "a": "WR1",
+   "b": "K",
+   "relation": "same",
+   "r": 0.126,
+   "rho": 0.121,
+   "n": 2712
+  },
+  {
+   "a": "WR1",
+   "b": "K",
+   "relation": "opp",
+   "r": -0.017,
+   "rho": -0.017,
+   "n": 1356
+  },
+  {
+   "a": "WR1",
+   "b": "DST",
+   "relation": "same",
+   "r": -0.007,
+   "rho": -0.007,
+   "n": 2718
+  },
+  {
+   "a": "WR1",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.224,
+   "rho": -0.214,
+   "n": 1359
+  },
+  {
+   "a": "WR2",
+   "b": "WR2",
+   "relation": "opp",
+   "r": 0.07,
+   "rho": 0.067,
+   "n": 1359
+  },
+  {
+   "a": "WR2",
+   "b": "WR3",
+   "relation": "same",
+   "r": 0.183,
+   "rho": 0.175,
+   "n": 2698
+  },
+  {
+   "a": "WR2",
+   "b": "WR3",
+   "relation": "opp",
+   "r": 0.035,
+   "rho": 0.033,
+   "n": 1349
+  },
+  {
+   "a": "WR2",
+   "b": "TE1",
+   "relation": "same",
+   "r": -0.026,
+   "rho": -0.025,
+   "n": 2711
+  },
+  {
+   "a": "WR2",
+   "b": "TE1",
+   "relation": "opp",
+   "r": 0.049,
+   "rho": 0.047,
+   "n": 1355
+  },
+  {
+   "a": "WR2",
+   "b": "K",
+   "relation": "same",
+   "r": 0.094,
+   "rho": 0.09,
+   "n": 2712
+  },
+  {
+   "a": "WR2",
+   "b": "K",
+   "relation": "opp",
+   "r": -0.003,
+   "rho": -0.002,
+   "n": 1356
+  },
+  {
+   "a": "WR2",
+   "b": "DST",
+   "relation": "same",
+   "r": -0.047,
+   "rho": -0.045,
+   "n": 2718
+  },
+  {
+   "a": "WR2",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.137,
+   "rho": -0.131,
+   "n": 1359
+  },
+  {
+   "a": "WR3",
+   "b": "WR3",
+   "relation": "opp",
+   "r": 0.053,
+   "rho": 0.051,
+   "n": 1339
+  },
+  {
+   "a": "WR3",
+   "b": "TE1",
+   "relation": "same",
+   "r": -0.043,
+   "rho": -0.042,
+   "n": 2691
+  },
+  {
+   "a": "WR3",
+   "b": "TE1",
+   "relation": "opp",
+   "r": -0.017,
+   "rho": -0.016,
+   "n": 1345
+  },
+  {
+   "a": "WR3",
+   "b": "K",
+   "relation": "same",
+   "r": 0.058,
+   "rho": 0.055,
+   "n": 2692
+  },
+  {
+   "a": "WR3",
+   "b": "K",
+   "relation": "opp",
+   "r": 0.039,
+   "rho": 0.037,
+   "n": 1346
+  },
+  {
+   "a": "WR3",
+   "b": "DST",
+   "relation": "same",
+   "r": -0.077,
+   "rho": -0.074,
+   "n": 2698
+  },
+  {
+   "a": "WR3",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.091,
+   "rho": -0.087,
+   "n": 1349
+  },
+  {
+   "a": "TE1",
+   "b": "TE1",
+   "relation": "opp",
+   "r": -0.008,
+   "rho": -0.007,
+   "n": 1352
+  },
+  {
+   "a": "TE1",
+   "b": "K",
+   "relation": "same",
+   "r": 0.036,
+   "rho": 0.034,
+   "n": 2706
+  },
+  {
+   "a": "TE1",
+   "b": "K",
+   "relation": "opp",
+   "r": -0.014,
+   "rho": -0.013,
+   "n": 1352
+  },
+  {
+   "a": "TE1",
+   "b": "DST",
+   "relation": "same",
+   "r": -0.095,
+   "rho": -0.091,
+   "n": 2711
+  },
+  {
+   "a": "TE1",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.06,
+   "rho": -0.057,
+   "n": 1355
+  },
+  {
+   "a": "K",
+   "b": "K",
+   "relation": "opp",
+   "r": -0.178,
+   "rho": -0.17,
+   "n": 1353
+  },
+  {
+   "a": "K",
+   "b": "DST",
+   "relation": "same",
+   "r": 0.3,
+   "rho": 0.287,
+   "n": 2712
+  },
+  {
+   "a": "K",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.398,
+   "rho": -0.382,
+   "n": 1356
+  },
+  {
+   "a": "DST",
+   "b": "DST",
+   "relation": "opp",
+   "r": -0.325,
+   "rho": -0.312,
+   "n": 1359
+  }
+ ]
+}

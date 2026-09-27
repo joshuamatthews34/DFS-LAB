@@ -10,6 +10,9 @@
   python -m core.cli compare 2026-wk02-main 195648006 --set KEY --set KEY [...]
   python -m core.cli lateswap 2026-wk02-main BEFORE_KEY AFTER_KEY
   python -m core.cli season
+  python -m core.cli calibrate [--slate SLATE ...] [--min-proj 5] [--save]
+  python -m core.cli simulate 2026-wk03-main [--sims 10000] [--seed 2026]
+  python -m core.cli correlations [--refresh]
 
 Exits with status 1 when the report lists problems.
 """
@@ -19,7 +22,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import builds, compare, detect, grade, lateswap, slate
+from . import builds, calibration, compare, correlations, detect, grade, lateswap, settings, sim, slate
 from .io_utils import FileProblem
 
 
@@ -60,6 +63,16 @@ def main(argv=None):
     ls.add_argument("before")
     ls.add_argument("after", nargs="?", default=grade.ENTERED_KEY)
     sub.add_parser("season", help="the season table: each method across slates")
+    cal = sub.add_parser("calibrate", help="SaberSim percentiles vs actual scores; fit tail widths")
+    cal.add_argument("--slate", action="append", dest="slates", help="default: every slate with results")
+    cal.add_argument("--min-proj", type=float, default=calibration.DEFAULT_MIN_PROJ)
+    cal.add_argument("--save", action="store_true", help="use the fitted tail widths from now on")
+    sm = sub.add_parser("simulate", help="simulate a slate and print each player's range")
+    sm.add_argument("slate")
+    sm.add_argument("--sims", type=int)
+    sm.add_argument("--seed", type=int)
+    co = sub.add_parser("correlations", help="show (or re-estimate) the nflverse correlations")
+    co.add_argument("--refresh", action="store_true", help="download nflverse 2021-2025 and re-estimate")
     args = ap.parse_args(argv)
 
     try:
@@ -96,6 +109,45 @@ def main(argv=None):
             table, n = builds.season_table()
             print(table.to_string(index=False) if not table.empty else "No results recorded yet.")
             print(builds.season_note(n))
+            return 0
+        if args.cmd == "calibrate":
+            ids = args.slates or calibration.slates_with_results()
+            df, notes = calibration.collect(ids, args.min_proj)
+            for n in notes:
+                print(n)
+            if df.empty:
+                print("No players with both SaberSim percentiles and Actual scores.")
+                return 1
+            lower, upper = calibration.fit(df)
+            print(f"{len(df):,} players from {', '.join(ids)} (projected {args.min_proj}+ points)")
+            print(calibration.table(df, lower, upper).to_string(index=False))
+            print(f"Fitted tail widths: lower {lower}, upper {upper}")
+            if args.save:
+                settings.put("sim.lower_tail", lower)
+                settings.put("sim.upper_tail", upper)
+                print("Saved: the simulator uses these tail widths from now on.")
+            return 0
+        if args.cmd == "simulate":
+            s = sim.SimSettings.saved()
+            s.n_sims = args.sims or s.n_sims
+            s.seed = args.seed if args.seed is not None else s.seed
+            result = sim.simulate(args.slate, s)
+            for w in result.warnings:
+                print(f"! {w}")
+            print(f"{s.n_sims:,} simulated slates, seed {s.seed}, tail widths {s.lower_tail}/{s.upper_tail}, "
+                  f"from {result.source_file}")
+            print(result.summary().to_string(index=False))
+            return 0
+        if args.cmd == "correlations":
+            if args.refresh:
+                folder = slate.project_root() / "cache" / "nflverse"
+                print(f"Downloading nflverse 2021-2025 into {folder} ...")
+                correlations.download(folder)
+                correlations.save(correlations.estimate(folder))
+            data = correlations.load()
+            print(f"{data['source']}, seasons {data['seasons'][0]}-{data['seasons'][-1]}, "
+                  f"{data['team_weeks']:,} team-weeks, estimated {data['estimated_on']}")
+            print(correlations.table(data).to_string(index=False))
             return 0
         if args.cmd == "import":
             report = slate.import_files(args.slate, args.files)

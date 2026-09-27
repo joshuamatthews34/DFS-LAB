@@ -2,8 +2,8 @@
 
 Your own lineup lab for DraftKings NFL, built from [SPEC.md](SPEC.md) one milestone at a time.
 
-**Status:** Milestones 1–3 are built: import and check files, the grader, and the comparison screen
-and late-swap grader. Next up: Milestone 4 (the simulator).
+**Status:** Milestones 1–4 are built: import and check files, the grader, the comparison screen and
+late-swap grader, and the simulator. Next up: Milestone 5 (the builder).
 
 ---
 
@@ -152,6 +152,46 @@ later, e.g. after the 4:05 games started.
 
 ---
 
+## Milestone 4 check: the simulator
+
+1. Make sure Weeks 1 and 2 main are imported (`2026-wk01-main`, `2026-wk02-main`) with their
+   post-game SaberSim exports. Add each week's pre-lock export too if you have it.
+2. In Terminal (the internet is needed once, for the nflverse download G6 uses):
+
+   ```
+   DFS_LAB_GOLDEN=1 ./run.sh test tests/test_golden_m4.py -v -s
+   ```
+
+3. **Pass** = every line ends in `PASSED`:
+   - the calibration table shows about **20.8%** of actual scores above SaberSim's 85th percentile
+     (within 2 points), the finding from your NFL DFS project;
+   - **G6:** the QB DraftKings points DFS Lab computes from nflverse match SaberSim's `Actual` for all
+     27 Week 1 QBs and all 32 Week 2 QBs.
+
+## The simulator (the Simulator screen)
+
+**Calibration tab.** For every past slate with results, the table compares where actual scores
+landed with where SaberSim's percentiles said they would. For example: expected 15% above the 85th
+percentile, SaberSim X%, with tail widths Y%. DFS Lab fits two **tail widths** (lower and upper)
+that bring the actual rates in line. Click **Use the fitted tail widths** to have the simulator use
+them. 1.0 means SaberSim's ranges as they are, and 1.3 means 30% wider. The average (`dk_points`)
+stays the same either way. By default only players projected 5+ points count; you can change that.
+
+**Correlations tab.** How DraftKings scores move together, estimated from nflverse weekly stats
+2021–2025 (2,718 team-weeks). For example, QB1 with his own WR1 is +0.47 and QB1 with the defense
+he faces is −0.44. `./run.sh correlations --refresh` re-downloads and re-estimates.
+
+**Simulate tab.** 10,000 simulated slates by default, with a fixed seed so the same settings give
+the same result. Each player's outcomes follow a smooth curve through SaberSim's 25th–99th
+percentiles, and the average equals `dk_points`. Players in the same game move together. The table
+shows each player's simulated average and range next to SaberSim's.
+
+**No hindsight:** the simulator reads the slate's **pre-lock** SaberSim export (projections and
+percentiles). It never reads `Actual` or `Live Proj`. If the slate only has the post-game export, it
+uses that export's projections and warns that they may include news from after lock.
+
+---
+
 ## What the report tells you
 
 | Line | Meaning |
@@ -215,6 +255,9 @@ None of this goes into git. This repository is public, so your contest files sta
 ./run.sh compare 2026-wk02-main 195648006 --set KEY --set KEY           # compare builds
 ./run.sh lateswap 2026-wk02-main BEFORE_KEY [AFTER_KEY]                 # grade a late swap
 ./run.sh season                                                         # the season table
+./run.sh calibrate [--save]                     # calibration table; --save uses the fitted tail widths
+./run.sh simulate 2026-wk03-main                # simulate a slate
+./run.sh correlations [--refresh]               # the correlation estimates
 ./run.sh test                                  # run the automated checks
 ```
 
@@ -229,6 +272,6 @@ DFS_LAB_WEEK2_DIR=~/Downloads/week2 ./run.sh test tests/test_m1_week2_check.py
 ## Not built yet
 
 - Codex captain caps: SPEC 3.6 doesn't give the file layout yet, so there's no importer for them.
-- Player pairings (6.3); the simulator, builder, fill methods and simulated ROI (Milestones 4–6).
+- Player pairings (6.3); the builder, fill methods and simulated ROI (Milestones 5–6).
 - Flagging a build whose pre-lock projection doesn't match the pre-lock snapshot (section 7): the
   snapshot is created at build time, which arrives with the builder in Milestone 5.

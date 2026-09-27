@@ -49,3 +49,14 @@ def test_compare_late_swap_and_season_screens(home, classic_slate):
     at.button[0].click().run()
     assert not at.exception
     assert at.header[0].value.endswith("better, 0 worse)")
+
+
+def test_simulator_screen(home, classic_slate):
+    slate.import_files("2026-wk02-main", classic_slate.values())
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    at.sidebar.radio[0].set_value("Simulator").run()
+    assert not at.exception
+    assert len(at.dataframe) >= 2                                   # calibration table, correlations table
+    sim_button = [b for b in at.button if b.label == "Simulate"][0]
+    sim_button.click().run()
+    assert not at.exception

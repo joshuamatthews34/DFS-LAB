@@ -9,14 +9,16 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import builds, compare, detect, grade, lateswap, slate  # noqa: E402
+from core import (builds, calibration, compare, correlations, detect, grade, lateswap, settings,  # noqa: E402
+                  sim, slate)
 from core.io_utils import FileProblem  # noqa: E402
 
 st.set_page_config(page_title="DFS Lab", page_icon="🧪", layout="wide")
 st.sidebar.title("DFS Lab")
 screen = st.sidebar.radio("Screen", ["Import files", "Slate reports", "Grade lineups", "Compare builds",
-                                     "Late swap", "Season"])
-st.sidebar.caption("Milestones 1-3: import and check files, grade lineups, compare builds, grade late swaps.")
+                                     "Late swap", "Season", "Simulator"])
+st.sidebar.caption("Milestones 1-4: import and check files, grade lineups, compare builds, grade late swaps, "
+                   "simulate slates.")
 
 
 def _size_kb(path):
@@ -331,6 +333,78 @@ elif screen == "Season":
         st.info(builds.season_note(n))
         with st.expander("Every recorded result"):
             st.dataframe(builds.season_rows(), hide_index=True, width="stretch")
+
+elif screen == "Simulator":
+    st.title("Simulator")
+    cal_tab, corr_tab, sim_tab = st.tabs(["Calibration", "Correlations", "Simulate a slate"])
+
+    with cal_tab:
+        st.write("Do actual scores land where SaberSim's percentiles say they should? If SaberSim's ranges are "
+                 "too narrow, the tail widths stretch them.")
+        with_results = calibration.slates_with_results()
+        if not with_results:
+            st.info("No slate has a post-game SaberSim export yet.")
+        else:
+            chosen = st.multiselect("Slates", with_results, default=with_results)
+            min_proj = st.number_input("Only players projected at least", 0.0, 30.0, calibration.DEFAULT_MIN_PROJ, 0.5)
+            df, notes = calibration.collect(chosen, min_proj)
+            for n in notes:
+                st.warning(n)
+            if not df.empty:
+                lower, upper = calibration.fit(df)
+                saved = (settings.get("sim.lower_tail"), settings.get("sim.upper_tail"))
+                st.caption(f"{len(df):,} players from {len(chosen)} slate(s). Percentiles come from each slate's "
+                           f"pre-lock export when it has one.")
+                st.dataframe(calibration.table(df, lower, upper), hide_index=True, width="stretch")
+                c = st.columns(3)
+                c[0].metric("Fitted lower tail width", lower)
+                c[1].metric("Fitted upper tail width", upper)
+                c[2].metric("In use now", f"{saved[0]} / {saved[1]}")
+                if st.button("Use the fitted tail widths", type="primary"):
+                    settings.put("sim.lower_tail", lower)
+                    settings.put("sim.upper_tail", upper)
+                    st.success(f"Saved. Simulations now use {lower} / {upper}.")
+                with st.expander("Set tail widths by hand"):
+                    lo = st.number_input("Lower tail width", 0.5, 3.0, float(saved[0]), 0.05)
+                    hi = st.number_input("Upper tail width", 0.5, 3.0, float(saved[1]), 0.05)
+                    if st.button("Save these"):
+                        settings.put("sim.lower_tail", lo)
+                        settings.put("sim.upper_tail", hi)
+                        st.success("Saved.")
+                st.caption("1.0 = SaberSim's percentiles as they are. 1.3 = each percentile 30% further from the "
+                           "median. The average (dk_points) stays the same either way.")
+
+    with corr_tab:
+        data = correlations.load()
+        st.write(f"How DraftKings scores move together, from {data['source']} "
+                 f"({data['seasons'][0]}-{data['seasons'][-1]}, {data['team_weeks']:,} team-weeks). "
+                 f"Roles: QB1 = most pass attempts, RB1-2 = most carries + targets, WR1-3 and TE1 = most "
+                 f"targets. Players projected under {sim.MIN_CORRELATED_PROJ} point move on their own.")
+        st.dataframe(correlations.table(data), hide_index=True, width="stretch")
+        st.caption("Copula r is what the simulator uses; rank corr is what was measured. Refresh with "
+                   "./run.sh correlations --refresh")
+
+    with sim_tab:
+        sid = pick_slate()
+        if sid:
+            saved = sim.SimSettings.saved()
+            c = st.columns(2)
+            n = c[0].number_input("Simulated slates", 1_000, 100_000, saved.n_sims, 1_000)
+            seed = c[1].number_input("Random seed (same seed = same result)", 0, 10**9, saved.seed)
+            st.caption(f"Tail widths in use: {saved.lower_tail} lower / {saved.upper_tail} upper.")
+            if st.button("Simulate", type="primary"):
+                try:
+                    with st.spinner("Simulating..."):
+                        st.session_state["sim"] = sim.simulate(
+                            sid, sim.SimSettings(int(n), int(seed), saved.lower_tail, saved.upper_tail))
+                except FileProblem as e:
+                    st.error(str(e))
+            if "sim" in st.session_state:
+                result = st.session_state["sim"]
+                for w in result.warnings:
+                    st.warning(w)
+                st.caption(f"{result.settings.n_sims:,} simulated slates from {result.source_file}.")
+                st.dataframe(result.summary(), hide_index=True, width="stretch")
 
 else:
     st.title("Slate reports")
