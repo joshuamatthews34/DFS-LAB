@@ -8,3 +8,6 @@ __pycache__/
 dfs_lab.db
 slates/*
 !slates/.gitkeep
+
+# Downloaded nflverse data (./run.sh correlations --refresh, golden test G6)
+/cache/
