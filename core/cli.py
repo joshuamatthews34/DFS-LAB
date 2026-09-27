@@ -4,6 +4,8 @@
   python -m core.cli import 2026-wk02-main FILE [FILE ...]
   python -m core.cli recheck 2026-wk02-main
   python -m core.cli report 2026-wk02-main
+  python -m core.cli sets 2026-wk02-main
+  python -m core.cli grade 2026-wk02-main 195648006 [--set KEY ...] [--only-contest]
 
 Exits with status 1 when the report lists problems.
 """
@@ -13,7 +15,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import detect, slate
+from . import detect, grade, slate
 from .io_utils import FileProblem
 
 
@@ -29,6 +31,13 @@ def main(argv=None):
     for name in ("recheck", "report"):
         p = sub.add_parser(name, help="re-read a slate's files" if name == "recheck" else "print the last report")
         p.add_argument("slate")
+    p = sub.add_parser("sets", help="list a slate's contests and lineup sets")
+    p.add_argument("slate")
+    g = sub.add_parser("grade", help="grade lineup sets against a contest's real field")
+    g.add_argument("slate")
+    g.add_argument("contest")
+    g.add_argument("--set", action="append", dest="sets", help="lineup set key (repeatable; default all)")
+    g.add_argument("--only-contest", action="store_true", help="only entries entered in this contest")
     args = ap.parse_args(argv)
 
     try:
@@ -37,6 +46,16 @@ def main(argv=None):
                 when = datetime.fromtimestamp(mtime).strftime("%b %d %H:%M")
                 print(f"{when}  {det.label:<32} {det.path.name}" + (f"  ({det.reason})" if det.reason else ""))
             return 0
+        if args.cmd == "sets":
+            for cid, name in grade.list_contests(args.slate):
+                print(f"contest {cid}  {name}")
+            for key, label, n in grade.available_sets(args.slate):
+                print(f"set {key}  {label}" + (f"  ({n} lineups)" if n is not None else ""))
+            return 0
+        if args.cmd == "grade":
+            info, grades = grade.grade(args.slate, args.contest, args.sets, args.only_contest)
+            print(grade.to_text(info, grades))
+            return 0 if not any(g.problems for g in grades) else 1
         if args.cmd == "import":
             report = slate.import_files(args.slate, args.files)
         elif args.cmd == "recheck":

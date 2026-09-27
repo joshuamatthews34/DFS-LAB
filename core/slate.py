@@ -112,12 +112,9 @@ def analyze_slate(slate_id, root=None, notes=(), messages=()):
 
     report = Report(slate_id, datetime.now().isoformat(timespec="seconds"))
     report.warnings.extend(messages)
-    parsed = {k: [] for k in (detect.SABERSIM, detect.DK_ENTRIES, detect.LINEUPS,
-                              detect.STANDINGS, detect.PAYOUTS, detect.WARROOM)}
+    parsed = {k: [] for k in PARSED_KINDS}
     seen = {}
-    files = sorted((p for p in raw.iterdir() if p.is_file() and not p.name.startswith(".")),
-                   key=lambda p: (p.stat().st_mtime, p.name))
-    for path in files:
+    for path in raw_files(slate_id, root):
         fr, det, data = _read_one(path, seen)
         report.files.append(fr)
         if data is not None:
@@ -139,6 +136,35 @@ def analyze_slate(slate_id, root=None, notes=(), messages=()):
     (results / "import_report.json").write_text(json.dumps(report.to_dict(), indent=2, default=str))
     (results / "import_report.txt").write_text(report.to_text() + "\n")
     return report
+
+
+PARSED_KINDS = (detect.SABERSIM, detect.DK_ENTRIES, detect.LINEUPS, detect.STANDINGS, detect.PAYOUTS,
+                detect.WARROOM)
+
+
+def raw_files(slate_id, root=None):
+    """The slate's saved files, oldest first (so 'newest wins' means last in the list)."""
+    raw = slate_dir(slate_id, root) / "raw"
+    if not raw.is_dir():
+        raise FileProblem(f"There's no slate called {slate_id} yet. Import some files first.")
+    return sorted((p for p in raw.iterdir() if p.is_file() and not p.name.startswith(".")),
+                  key=lambda p: (p.stat().st_mtime, p.name))
+
+
+def load_parsed(slate_id, root=None, skip=(detect.STANDINGS,)):
+    """Parse a slate's saved files. Returns {kind: [(FileReport, Detected, data), ...]} for clean files.
+
+    Standings are skipped by default: they're big, and core.field reads them with a cache.
+    """
+    parsed = {k: [] for k in PARSED_KINDS}
+    seen = {}
+    for path in raw_files(slate_id, root):
+        if detect.detect(path).kind in skip:
+            continue
+        fr, det, data = _read_one(path, seen)
+        if data is not None and fr.status != "error":
+            parsed[det.kind].append((fr, det, data))
+    return parsed
 
 
 def load_report(slate_id, root=None):

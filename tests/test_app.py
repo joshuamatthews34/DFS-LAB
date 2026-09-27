@@ -21,3 +21,14 @@ def test_reports_screen_shows_a_slate(home, classic_slate):
     at.sidebar.radio[0].set_value("Slate reports").run()
     assert not at.exception
     assert at.header[0].value == "2 entries · 1 standings file · 0 FPTS mismatches"
+
+
+def test_grade_screen(home, classic_slate):
+    slate.import_files("2026-wk02-main", classic_slate.values())
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    at.sidebar.radio[0].set_value("Grade lineups").run()
+    assert not at.exception
+    at.button[0].click().run()
+    assert not at.exception
+    assert any(m.value.startswith("**Graded against NFL $3 Play-Action") for m in at.markdown)
+    assert len(at.dataframe) >= 3          # build summary, player exposure, lineups

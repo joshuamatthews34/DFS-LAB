@@ -2,7 +2,8 @@
 
 Your own lineup lab for DraftKings NFL, built from [SPEC.md](SPEC.md) one milestone at a time.
 
-**Status:** Milestone 1 (import and check files) is built. Next up: Milestone 2 (the grader).
+**Status:** Milestone 1 (import and check files) and Milestone 2 (the grader) are built.
+Next up: Milestone 3 (comparison screen and late-swap grader).
 
 ---
 
@@ -41,6 +42,58 @@ https://www.python.org/downloads/ and run `./run.sh` again.
 
 If anything is red, the message says exactly which file and what's wrong. Bring it back to
 your NFL DFS project in Claude if it doesn't make sense.
+
+---
+
+## Milestone 2 check: the grader
+
+The grader is trusted once it reproduces the golden numbers you already checked by hand (SPEC section 9, G1–G4).
+
+1. Import **Week 1 main** as slate `2026-wk01-main` and **Week 2 main** as slate `2026-wk02-main`: the
+   post-game SaberSim export, your entries files, the standings zips, and the SaberSim fill files.
+2. Put these labels in the fill files' names before importing, so the check can find them:
+   `Unique Rank 3`, `Portfolio+`, `UR1`, `UR2`, `UR4`, `UR5` (for example `UR1 week2.csv`).
+3. In Terminal, from the `dfs-lab` folder:
+
+   ```
+   DFS_LAB_GOLDEN=1 ./run.sh test tests/test_golden_m2.py -v
+   ```
+
+4. **Pass** = every line ends in `PASSED`. A failure prints the number DFS Lab got next to the one
+   expected. Bring it to your NFL DFS project in Claude if it isn't obvious why.
+
+## Grading lineups (the Grade lineups screen)
+
+Pick a slate, a contest (any standings file in the slate) and one or more **lineup sets**, then click
+**Grade**. The lineup sets are:
+
+- **My entered lineups (from the standings):** your entries exactly as DraftKings scored them, late
+  swaps included. This is the one to use for "how did I actually do".
+- **Each entries file:** the lineups in that `DKEntries` file. If one disagrees with what DraftKings
+  scored (for example a pre-swap file), the grader says so.
+- **Each lineup file:** DFS Army exports, SaberSim fill files and so on.
+
+Tick **Only entries entered in this contest** to grade just the entries you had in that contest.
+Otherwise every lineup in the set is scored against that contest's field.
+
+What you get:
+
+| | |
+|---|---|
+| **Graded against** | Contest, field size, winning score, top-1% line, cash line (with a payout file) and the perfect lineup. |
+| **Build summary** | One row per lineup set: average, median and best score; best finish; counts in the top 0.1/1/5/10/20%; cashed, won, fees and ROI (only with a payout file, never estimated); average salary left, total ownership, players shared, duplicates. |
+| **Player exposure** | Each player's count and exposure, projected vs actual ownership, leverage (exposure minus actual ownership), captain/FLEX split, War Room tag, and how many of the contest's top-1% lineups had them. |
+| **Lineups** | Every lineup with score, rank, top-%, prize and stack tag. Click a column to sort. |
+
+How the numbers work:
+
+- **Scores** come from SaberSim's `Actual` (M1 checked it matches DraftKings). A captain scores 1.5 × the player's FLEX score.
+- **Top X%** means the share of the field scoring *strictly higher* is X% or less.
+- Each lineup is ranked against the real field on its own. Your entries that were in the contest keep their real place.
+- **Ties** split the prize the way DraftKings does: the tied places' prizes are averaged.
+- **Stack tags:** `QB+2|1` = QB with 2 of his own WR/TE and 1 RB/WR/TE from the other team. Showdown shows the captain's position and the team split, e.g. `QB CPT 4-2`.
+
+Results are saved in `slates/<slate>/results/grades/<contest>/` (a text report plus CSVs you can open in Excel).
 
 ---
 
@@ -101,6 +154,8 @@ None of this goes into git. This repository is public, so your contest files sta
 ./run.sh import 2026-wk02-main FILE FILE ...   # import and print the report
 ./run.sh recheck 2026-wk02-main                # re-read a slate's saved files
 ./run.sh report 2026-wk02-main                 # print the last report
+./run.sh sets 2026-wk02-main                   # list contests and lineup sets
+./run.sh grade 2026-wk02-main 195648006        # grade every lineup set against that contest
 ./run.sh test                                  # run the automated checks
 ```
 
@@ -115,4 +170,5 @@ DFS_LAB_WEEK2_DIR=~/Downloads/week2 ./run.sh test tests/test_m1_week2_check.py
 ## Not built yet
 
 - Codex captain caps: SPEC 3.6 doesn't give the file layout yet, so there's no importer for them.
-- The grader, comparison screen, simulator and builder are Milestones 2–7.
+- Player pairings (6.3), the head-to-head comparison and late-swap grader (Milestone 3), and the
+  simulator, builder and season tracker (Milestones 4–7).

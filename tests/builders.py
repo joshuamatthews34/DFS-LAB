@@ -14,13 +14,13 @@ from core.importers.sabersim import REQUIRED
 # id, name, pos, team, opp, salary, ss_proj, my_proj, actual
 CLASSIC_PLAYERS = [
     (1001, "Dak Prescott", "QB", "DAL", "NYG", 6500, 19.1, 19.8, 22.34),
-    (1002, "CeeDee Lamb", "WR", "DAL", "NYG", 8000, 17.0, 17.5, 18.5),
+    (1002, "CeeDee Lamb", "WR", "DAL", "NYG", 7000, 17.0, 17.5, 18.5),
     (1003, "Jake Ferguson", "TE", "DAL", "NYG", 4000, 9.0, 9.2, 9.1),
     (1004, "Kenneth Walker III", "RB", "SEA", "ARI", 6000, 14.0, 14.4, 15.2),
-    (1005, "Jaxon Smith-Njigba", "WR", "SEA", "ARI", 6800, 16.1, 16.0, 20.0),
-    (1006, "Malik Nabers", "WR", "NYG", "DAL", 7500, 18.3, 18.0, 25.3),
-    (1007, "Tyrone Tracy Jr.", "RB", "NYG", "DAL", 5500, 12.0, 12.6, 11.0),
-    (1008, "Marvin Harrison Jr.", "WR", "ARI", "SEA", 6400, 13.2, 13.0, 7.7),
+    (1005, "Jaxon Smith-Njigba", "WR", "SEA", "ARI", 6000, 16.1, 16.0, 20.0),
+    (1006, "Malik Nabers", "WR", "NYG", "DAL", 7000, 18.3, 18.0, 25.3),
+    (1007, "Tyrone Tracy Jr.", "RB", "NYG", "DAL", 5000, 12.0, 12.6, 11.0),
+    (1008, "Marvin Harrison Jr.", "WR", "ARI", "SEA", 5600, 13.2, 13.0, 7.7),
     (1009, "Trey McBride", "TE", "ARI", "SEA", 5800, 12.9, 13.1, 12.4),
     (1010, "Cowboys", "DST", "DAL", "NYG", 3000, 6.0, 6.2, 5.0),
     (1011, "Kenny Gainwell", "RB", "ARI", "SEA", 4500, 8.0, 8.4, 13.9),

@@ -123,9 +123,9 @@ def _detect_csv(path, header):
             if header[4:4 + len(slots)] == slots:
                 return Detected(path, DK_ENTRIES, fmt=fmt)
         return Detected(path, UNKNOWN, "Looks like a DraftKings entries file, but the roster columns aren't classic or showdown.")
-    fmt = rosters.format_for_slots(header)
-    if fmt:
-        return Detected(path, LINEUPS, fmt=fmt)
+    for fmt, slots in rosters.SLOTS.items():
+        if header[:len(slots)] == slots:   # extra columns to the right (projections etc.) are ignored
+            return Detected(path, LINEUPS, fmt=fmt)
     if [h.lower() for h in header] == PAYOUT_HEADER:
         return Detected(path, PAYOUTS, contest_id=contest_id_from_name(path.name))
     if "DFS ID" in header and "SS Proj" in header:

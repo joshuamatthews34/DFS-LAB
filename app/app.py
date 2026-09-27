@@ -9,13 +9,13 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import detect, slate  # noqa: E402
+from core import detect, grade, slate  # noqa: E402
 from core.io_utils import FileProblem  # noqa: E402
 
 st.set_page_config(page_title="DFS Lab", page_icon="🧪", layout="wide")
 st.sidebar.title("DFS Lab")
-screen = st.sidebar.radio("Screen", ["Import files", "Slate reports"])
-st.sidebar.caption("Milestone 1: import and check files.")
+screen = st.sidebar.radio("Screen", ["Import files", "Slate reports", "Grade lineups"])
+st.sidebar.caption("Milestone 1: import and check files. Milestone 2: grade lineups.")
 
 
 def _size_kb(path):
@@ -73,6 +73,47 @@ def show_report(report):
                f"{slate.slate_dir(report.slate_id)}. Report text: results/import_report.txt")
 
 
+def show_grades(info, grades):
+    st.markdown(f"**{info.graded_against()}**")
+    if info.perfect:
+        st.caption("Perfect lineup: " + " / ".join(info.perfect["players"])
+                   + f" = {info.perfect['score']} (${info.perfect['salary']:,})")
+    if not info.has_payouts:
+        st.caption("No payout file for this contest, so cashed / won / ROI aren't shown. They're never estimated.")
+
+    st.markdown("**Build summary** (one row per lineup set)")
+    st.dataframe(pd.DataFrame([grade.summary_row(g, info) for g in grades]), hide_index=True, width="stretch")
+    st.caption("Top X% = the share of the field scoring strictly higher is X% or less. Each lineup is ranked "
+               "against the real field on its own. Shared = average players any two lineups have in common.")
+
+    for tab, g in zip(st.tabs([g.label for g in grades]), grades):
+        with tab:
+            for p in g.problems:
+                st.error(p)
+            for w in g.warnings:
+                st.warning(w)
+            if g.lineups.empty:
+                continue
+            s = g.summary
+            c = st.columns(6)
+            c[0].metric("Lineups", s["lineups"])
+            c[1].metric("Average", s["avg_score"])
+            c[2].metric("Best", s["best_score"])
+            c[3].metric("Best finish", f"#{s['best_rank']:,}", f"top {100 * s['best_share']:.2f}%", delta_color="off")
+            c[4].metric("Top 1%", s["counts"]["top 1%"])
+            if info.has_payouts:
+                c[5].metric("ROI", "n/a" if s["roi"] is None else f"{100 * s['roi']:.1f}%")
+            exp_tab, lu_tab = st.tabs(["Player exposure", "Lineups"])
+            with exp_tab:
+                st.dataframe(g.exposure, hide_index=True, width="stretch")
+                st.caption("Leverage = your exposure minus actual ownership. Top-1% lineups = how many of the "
+                           "contest's top-1% lineups had the player.")
+            with lu_tab:
+                st.dataframe(grade.lineup_table(g, info.has_payouts), hide_index=True, width="stretch")
+                st.caption("Click a column to sort. Stack: QB+2|1 = QB with 2 of his WR/TE and 1 RB/WR/TE from "
+                           "the other team; showdown shows the captain and the team split.")
+
+
 if screen == "Import files":
     st.title("Import a slate's files")
     st.write("Pick the files for **one slate** (for example the Week 2 main slate). DFS Lab copies them into "
@@ -111,6 +152,39 @@ if screen == "Import files":
     if "report" in st.session_state:
         st.divider()
         show_report(st.session_state["report"])
+
+elif screen == "Grade lineups":
+    st.title("Grade lineups")
+    st.write("Score lineup sets against a contest's real field after the games.")
+    slates = slate.list_slates()
+    if not slates:
+        st.info("No slates imported yet.")
+    else:
+        sid = st.selectbox("Slate", slates, index=len(slates) - 1)
+        try:
+            contests = grade.list_contests(sid)
+            sets = grade.available_sets(sid)
+        except FileProblem as e:
+            st.error(str(e))
+            contests, sets = [], []
+        if not contests:
+            st.info("This slate has no standings files yet. Import them on the Import files screen.")
+        elif not sets:
+            st.info("This slate has no entries files or lineup exports to grade.")
+        else:
+            contest = st.selectbox("Contest", contests, format_func=lambda c: f"{c[0]}  {c[1]}".strip())
+            labels = {k: label + (f" ({n} lineups)" if n is not None else "") for k, label, n in sets}
+            chosen = st.multiselect("Lineup sets", list(labels), default=[sets[0][0]], format_func=labels.get)
+            only = st.checkbox("Only entries entered in this contest (for your entries)")
+            if st.button("Grade", type="primary", disabled=not chosen):
+                try:
+                    with st.spinner("Grading. The first time a big contest is read takes a few seconds..."):
+                        st.session_state["graded"] = grade.grade(sid, contest[0], chosen, only)
+                except FileProblem as e:
+                    st.error(str(e))
+            if "graded" in st.session_state:
+                st.divider()
+                show_grades(*st.session_state["graded"])
 
 else:
     st.title("Slate reports")
