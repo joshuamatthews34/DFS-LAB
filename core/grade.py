@@ -128,6 +128,18 @@ def entered_set(slate_id, parsed, book, root=None):
     return s, problems
 
 
+def resolve_sets(slate_id, keys, parsed, book, root=None):
+    """The lineup sets named by `keys`, plus problems found while reading the entered set."""
+    all_sets = {s.key: s for s in lineup_sets(parsed)}
+    problems = {}
+    if ENTERED_KEY in keys:
+        all_sets[ENTERED_KEY], problems[ENTERED_KEY] = entered_set(slate_id, parsed, book, root)
+    unknown = [k for k in keys if k not in all_sets]
+    if unknown:
+        raise FileProblem(f"No lineup set called {', '.join(unknown)} in slate {slate_id}.")
+    return [all_sets[k] for k in keys], problems
+
+
 def contest_names(parsed):
     names, fees = {}, {}
     for _, _, d in parsed[detect.DK_ENTRIES]:
@@ -158,11 +170,17 @@ class PlayerBook:
     fmt: str
     players: pd.DataFrame
     post_file: str
-    pre_file: str
+    pre_file: str                      # where projections come from
     from_standings: list = field(default_factory=list)
 
+    @property
+    def prelock_projections(self):
+        return self.pre_file != self.post_file
 
-def build_book(parsed, fld):
+
+def build_book(parsed, fld=None):
+    """Player table from the newest post-game SaberSim export. `fld` (a contest field) adds
+    actual ownership and fills missing Actual scores from DraftKings' FPTS."""
     exports = parsed[detect.SABERSIM]
     post = [x for x in exports if x[2].has_actuals]
     pre = [x for x in exports if not x[2].has_actuals]
@@ -183,7 +201,7 @@ def build_book(parsed, fld):
 
     base_actual = df["base_id"].map(df["actual"])
     fallback = []
-    if base_actual.isna().any():
+    if fld is not None and base_actual.isna().any():
         dk = fld.players[fld.players["roster_position"] != "CPT"].drop_duplicates("name_key")
         dk = dk.set_index("name_key")["fpts"]
         for pid in df.index[base_actual.isna()]:
@@ -199,8 +217,10 @@ def build_book(parsed, fld):
     df["own_proj"] = df["dfs_id"].map(proj_src["my_own"]).fillna(df["my_own"])
 
     # Actual ownership (%Drafted). A player nobody drafted isn't listed, so 0%.
-    own = fld.players
-    if post_data.fmt == rosters.SHOWDOWN:
+    own = fld.players if fld is not None else None
+    if own is None:
+        df["own_actual"] = np.nan
+    elif post_data.fmt == rosters.SHOWDOWN:
         pct = own.groupby(["name_key", "roster_position"])["pct_drafted"].sum()
         df["own_actual"] = [float(pct.get((k, s), 0.0)) for k, s in zip(df.name_key, df.roster_slot)]
     else:
@@ -225,6 +245,8 @@ class ContestInfo:
     fee_cents: int = None
     perfect: dict = None
     has_payouts: bool = False
+    proj_file: str = None              # SaberSim export the projections come from
+    prelock_proj: bool = True          # False when only a post-game export was available
 
     def graded_against(self):
         parts = [f"Graded against {self.name or 'contest ' + self.contest_id}", f"{self.n:,} entries",
@@ -289,7 +311,8 @@ def grade(slate_id, contest_id, set_keys=None, only_contest=False, root=None, sa
     pool = book.players.dropna(subset=["points"]).rename(columns={"roster_slot": "slot"})
     info = ContestInfo(contest_id, names.get(contest_id, ""), fmt, fld.n, fld.top_score,
                        {s: fld.line(s) for s in BUCKETS}, fee_cents=fees.get(contest_id),
-                       perfect=perfect_lineup(pool, book.fmt), has_payouts=prizes is not None)
+                       perfect=perfect_lineup(pool, book.fmt), has_payouts=prizes is not None,
+                       proj_file=book.pre_file, prelock_proj=book.prelock_projections)
     if prizes is not None:
         info.last_paid_rank = int(np.nonzero(prizes)[0].max()) + 1
         info.cash_line = fld.score_at_rank(info.last_paid_rank)
@@ -298,18 +321,11 @@ def grade(slate_id, contest_id, set_keys=None, only_contest=False, root=None, sa
     tags = _warroom_tags(parsed)
     field_points = dict(zip(fld.entries["entry_id"], fld.entries["points"]))
 
-    all_sets = {s.key: s for s in lineup_sets(parsed)}
-    entered_problems = []
-    keys = set_keys or ([ENTERED_KEY] if parsed[detect.DK_ENTRIES] else []) + list(all_sets)
-    if ENTERED_KEY in keys:
-        all_sets[ENTERED_KEY], entered_problems = entered_set(slate_id, parsed, book, root)
-    unknown = [k for k in keys if k not in all_sets]
-    if unknown:
-        raise FileProblem(f"No lineup set called {', '.join(unknown)} in slate {slate_id}.")
+    keys = set_keys or ([ENTERED_KEY] if parsed[detect.DK_ENTRIES] else []) + [s.key for s in lineup_sets(parsed)]
+    sets, set_problems = resolve_sets(slate_id, keys, parsed, book, root)
 
     grades = []
-    for key in keys:
-        s = all_sets[key]
+    for key, s in zip(keys, sets):
         if only_contest and (key.startswith("entries:") or key == ENTERED_KEY):
             s = s.in_contest(contest_id)
         if s.fmt != book.fmt or (fmt and s.fmt != fmt):
@@ -318,8 +334,7 @@ def grade(slate_id, contest_id, set_keys=None, only_contest=False, root=None, sa
             grades.append(g)
             continue
         g = _grade_set(s, book, fld, info, prizes, field_points, top1, tags)
-        if key == ENTERED_KEY:
-            g.problems[:0] = entered_problems
+        g.problems[:0] = set_problems.get(key, [])
         if book.from_standings:
             g.warnings.append("SaberSim had no Actual for these players, so DraftKings' FPTS was used: "
                               + ", ".join(book.from_standings))
@@ -346,7 +361,8 @@ def _grade_set(s, book, fld, info, prizes, field_points, top1, tags):
         rows.append({"lineup": i + 1, "entry_id": s.entry_ids[i], "contest_id": s.contest_ids[i],
                      "fee": s.fees[i], "ids": ids, "score": round(float(pts.sum()), 2),
                      "salary": int(p.loc[ids, "salary"].sum()),
-                     "own": float(p.loc[ids, "own_actual"].sum())})
+                     "own": float(p.loc[ids, "own_actual"].sum()),
+                     "proj": round(float((p.loc[ids, "proj"] * p.loc[ids, "mult"]).sum()), 2)})
     lu = pd.DataFrame(rows)
     g = Grade(s.key, s.label, lu, pd.DataFrame(), {}, problems)
     if lu.empty:
@@ -375,6 +391,7 @@ def _grade_set(s, book, fld, info, prizes, field_points, top1, tags):
     lu["fee_paid"] = [(f if c == info.contest_id and pd.notna(f) else info.fee_cents)
                       for f, c in zip(lu["fee"], lu["contest_id"])]
     lu["salary_left"] = rosters.SALARY_CAP - lu["salary"]
+    lu["identity"] = [_identity(ids, p, book.fmt) for ids in lu["ids"]]
     lu["stack"] = [_stack_tag(ids, p, book.fmt) for ids in lu.ids]
     lu["players"] = [" / ".join(("CPT " if p.at[i, "mult"] > 1 else "") + p.at[i, "name"] for i in ids)
                      for ids in lu.ids]
@@ -391,6 +408,7 @@ def _summary(lu, p, fmt, has_payouts):
     out = {
         "lineups": n,
         "avg_score": round(float(lu["score"].mean()), 2),
+        "avg_proj": round(float(lu["proj"].mean()), 2),
         "median_score": round(float(lu["score"].median()), 2),
         "best_score": float(best["score"]),
         "best_rank": int(lu["rank"].min()),
@@ -400,7 +418,7 @@ def _summary(lu, p, fmt, has_payouts):
         "avg_salary_left": round(float(lu["salary_left"].mean()), 0),
         "avg_total_own": round(float(lu["own"].mean()), 1),
         "avg_shared": _avg_shared(lu.ids, p, fmt),
-        "duplicates": n - len({_identity(ids, p, fmt) for ids in lu.ids}),
+        "duplicates": n - lu["identity"].nunique(),
         "official_entries": int(lu["official"].sum()),
     }
     if has_payouts:
@@ -520,7 +538,8 @@ def summary_row(g, info):
     s = g.summary
     if not s:
         return {"Build": g.label}
-    row = {"Build": g.label, "Lineups": s["lineups"], "Avg": s["avg_score"], "Median": s["median_score"],
+    row = {"Build": g.label, "Lineups": s["lineups"], "Avg proj": s["avg_proj"], "Avg": s["avg_score"],
+           "Median": s["median_score"],
            "Best": s["best_score"], "Best rank": s["best_rank"], "Best top %": round(100 * s["best_share"], 2),
            "Median top %": round(100 * s["median_share"], 1),
            **{k.replace("top ", "Top "): v for k, v in s["counts"].items()}}

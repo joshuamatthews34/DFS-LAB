@@ -9,13 +9,14 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import detect, grade, slate  # noqa: E402
+from core import builds, compare, detect, grade, lateswap, slate  # noqa: E402
 from core.io_utils import FileProblem  # noqa: E402
 
 st.set_page_config(page_title="DFS Lab", page_icon="🧪", layout="wide")
 st.sidebar.title("DFS Lab")
-screen = st.sidebar.radio("Screen", ["Import files", "Slate reports", "Grade lineups"])
-st.sidebar.caption("Milestone 1: import and check files. Milestone 2: grade lineups.")
+screen = st.sidebar.radio("Screen", ["Import files", "Slate reports", "Grade lineups", "Compare builds",
+                                     "Late swap", "Season"])
+st.sidebar.caption("Milestones 1-3: import and check files, grade lineups, compare builds, grade late swaps.")
 
 
 def _size_kb(path):
@@ -114,6 +115,60 @@ def show_grades(info, grades):
                            "the other team; showdown shows the captain and the team split.")
 
 
+def pick_slate():
+    slates = slate.list_slates()
+    if not slates:
+        st.info("No slates imported yet.")
+        return None
+    return st.selectbox("Slate", slates, index=len(slates) - 1)
+
+
+def name_builds(sid, sets):
+    meta = builds.load_meta(sid)
+    with st.expander("Name your builds (method, refill, hindsight)", expanded=not any(m["name"] for m in meta.values())):
+        table = pd.DataFrame([{"key": k, "Lineup set": label, "Name": meta.get(k, builds.DEFAULT)["name"],
+                               "Method": meta.get(k, builds.DEFAULT)["method"],
+                               "Refill": meta.get(k, builds.DEFAULT)["refill"],
+                               "Hindsight": meta.get(k, builds.DEFAULT)["hindsight"]} for k, label, _ in sets])
+        edited = st.data_editor(table, hide_index=True, width="stretch", column_config={"key": None},
+                                disabled=["Lineup set"], key=f"labels-{sid}")
+        st.caption("Method groups results in the Season view (e.g. \"SaberSim UR3\", \"DFS Army v4\"). Refill = "
+                   "rebuilt later in SaberSim; compare only with other refills. Hindsight = has settings added "
+                   "after the games; left out of comparisons.")
+        if st.button("Save names"):
+            builds.save_meta(sid, {r["key"]: {"name": r["Name"] or "", "method": r["Method"] or "",
+                                              "refill": bool(r["Refill"]), "hindsight": bool(r["Hindsight"]),
+                                              "notes": meta.get(r["key"], builds.DEFAULT)["notes"]}
+                                   for r in edited.to_dict("records")})
+            st.success("Saved.")
+            meta = builds.load_meta(sid)
+    return meta
+
+
+def show_comparison(c):
+    st.markdown(f"**{c.info.graded_against()}**")
+    for w in c.warnings:
+        st.warning(w)
+    st.markdown("**All the numbers, side by side**")
+    st.dataframe(c.summary, hide_index=True, width="stretch")
+    st.markdown("**What each build leaned into** (its exposure vs the other builds' average, and how those players scored)")
+    for col, (name, t) in zip(st.columns(len(c.leans)), c.leans.items()):
+        with col:
+            st.caption(name)
+            st.dataframe(t[["Player", "Lean", "This build %", "Others avg %", "Final"]], hide_index=True,
+                         width="stretch")
+    st.markdown("**Exposure differences** (biggest spread first)")
+    st.dataframe(c.exposure, hide_index=True, width="stretch")
+    st.markdown("**Identical lineups shared between builds**")
+    st.dataframe(c.shared, width="stretch")
+    st.markdown("**Statistics**")
+    if not c.stats.empty:
+        st.dataframe(c.stats, hide_index=True, width="stretch")
+    st.warning(compare.STATS_WARNING)
+    if c.recorded:
+        st.caption(f"{c.recorded} named build(s) saved to the Season view.")
+
+
 if screen == "Import files":
     st.title("Import a slate's files")
     st.write("Pick the files for **one slate** (for example the Week 2 main slate). DFS Lab copies them into "
@@ -185,6 +240,97 @@ elif screen == "Grade lineups":
             if "graded" in st.session_state:
                 st.divider()
                 show_grades(*st.session_state["graded"])
+
+elif screen == "Compare builds":
+    st.title("Compare builds")
+    st.write("Same slate, same field: how did 2 to 6 builds do against each other?")
+    sid = pick_slate()
+    if sid:
+        try:
+            contests, sets = grade.list_contests(sid), grade.available_sets(sid)
+        except FileProblem as e:
+            st.error(str(e))
+            contests, sets = [], []
+        if not contests or len(sets) < 2:
+            st.info("You need a standings file and at least two lineup sets in this slate.")
+        else:
+            meta = name_builds(sid, sets)
+            contest = st.selectbox("Contest", contests, format_func=lambda c: f"{c[0]}  {c[1]}".strip())
+            names = {k: builds.label_for(k, label, meta) for k, label, _ in sets}
+            chosen = st.multiselect("Builds (2 to 6)", list(names), format_func=names.get, max_selections=6)
+            only = st.checkbox("Only entries entered in this contest (for your entries)")
+            with_hindsight = st.checkbox("Include hindsight builds (flagged, not saved to the season)")
+            if st.button("Compare", type="primary", disabled=len(chosen) < 2):
+                try:
+                    with st.spinner("Comparing..."):
+                        st.session_state["comparison"] = compare.compare(sid, contest[0], chosen, only, with_hindsight)
+                except FileProblem as e:
+                    st.error(str(e))
+            if "comparison" in st.session_state:
+                st.divider()
+                show_comparison(st.session_state["comparison"])
+
+elif screen == "Late swap":
+    st.title("Late-swap grader")
+    st.write("Did your late swaps help? Pick the lineups from before the swap and after it.")
+    sid = pick_slate()
+    if sid:
+        try:
+            sets = grade.available_sets(sid)
+            times = lateswap.kickoff_times(sid)
+        except FileProblem as e:
+            st.error(str(e))
+            sets, times = [], []
+        if len(sets) < 2:
+            st.info("You need two lineup sets: the entries before the swap and after it.")
+        else:
+            labels = {k: label for k, label, _ in sets}
+            keys = list(labels)
+            default_before = next((i for i, k in enumerate(keys) if "pre-swap" in labels[k].lower()),
+                                  next((i for i, k in enumerate(keys) if k.startswith("entries:")), 0))
+            before = st.selectbox("Before the swap", keys, format_func=labels.get, index=default_before)
+            after = st.selectbox("After the swap", keys, format_func=labels.get,
+                                 index=keys.index(grade.ENTERED_KEY) if grade.ENTERED_KEY in keys else 0)
+            locked = st.selectbox("Games already locked when you swapped", [None, *times],
+                                  format_func=lambda t: "The earliest kickoff (default)" if t is None
+                                  else f"Everything kicking off by {t:%a %I:%M %p}")
+            if st.button("Grade the swaps", type="primary", disabled=before == after):
+                try:
+                    with st.spinner("Pairing and scoring..."):
+                        st.session_state["swap"] = lateswap.grade_swap(sid, before, after, locked)
+                except FileProblem as e:
+                    st.error(str(e))
+            if "swap" in st.session_state:
+                r = st.session_state["swap"]
+                s = r.summary
+                st.divider()
+                st.header(r.headline())
+                c = st.columns(5)
+                c[0].metric("Paired", s["paired"])
+                c[1].metric("Changed", s["changed"])
+                c[2].metric("Better", s["better"])
+                c[3].metric("Worse", s["worse"])
+                c[4].metric("Net points", f"{s['net']:+,.1f}")
+                if s["rejected"]:
+                    st.error(f"{s['rejected']} swap(s) made an illegal roster and were rejected (not counted).")
+                for w in r.warnings:
+                    st.warning(w)
+                for side, ids in (("before the swap", r.unpaired_before), ("after the swap", r.unpaired_after)):
+                    if ids:
+                        more = f" and {len(ids) - 10} more" if len(ids) > 10 else ""
+                        st.info(f"Not paired, only {side}: {', '.join(map(str, ids[:10]))}{more}.")
+                st.dataframe(lateswap.changed_table(r), hide_index=True, width="stretch")
+
+elif screen == "Season":
+    st.title("Season")
+    table, n = builds.season_table()
+    if table.empty:
+        st.info("Nothing recorded yet. Name your builds with a method on Compare builds, then compare them.")
+    else:
+        st.dataframe(table, hide_index=True, width="stretch")
+        st.info(builds.season_note(n))
+        with st.expander("Every recorded result"):
+            st.dataframe(builds.season_rows(), hide_index=True, width="stretch")
 
 else:
     st.title("Slate reports")

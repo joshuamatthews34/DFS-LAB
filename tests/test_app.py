@@ -32,3 +32,20 @@ def test_grade_screen(home, classic_slate):
     assert not at.exception
     assert any(m.value.startswith("**Graded against NFL $3 Play-Action") for m in at.markdown)
     assert len(at.dataframe) >= 3          # build summary, player exposure, lineups
+
+
+def test_compare_late_swap_and_season_screens(home, classic_slate):
+    from core import builds, compare
+    slate.import_files("2026-wk02-main", classic_slate.values())
+    builds.save_meta("2026-wk02-main", {"entries:DKEntries.csv": {"name": "UR3", "method": "SaberSim UR3"}})
+    compare.compare("2026-wk02-main", "195648006", ["entered:standings", "entries:DKEntries.csv"])
+    for screen in ("Compare builds", "Late swap", "Season"):
+        at = AppTest.from_file(APP, default_timeout=60).run()
+        at.sidebar.radio[0].set_value(screen).run()
+        assert not at.exception, screen
+    assert len(at.dataframe) >= 1                                   # the season table
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    at.sidebar.radio[0].set_value("Late swap").run()
+    at.button[0].click().run()
+    assert not at.exception
+    assert at.header[0].value.endswith("better, 0 worse)")

@@ -38,11 +38,16 @@ CREATE TABLE IF NOT EXISTS standings_players (
     pct_drafted REAL, fpts REAL);
 CREATE TABLE IF NOT EXISTS payouts (
     slate_id TEXT, contest_id TEXT, rank_from INTEGER, rank_to INTEGER, prize_cents INTEGER);
+CREATE TABLE IF NOT EXISTS season_results (
+    slate_id TEXT, contest_id TEXT, build_key TEXT, method TEXT, name TEXT, refill INTEGER,
+    lineups INTEGER, top1 INTEGER, top5 INTEGER, cashed INTEGER, won REAL, fees REAL, graded_at TEXT,
+    PRIMARY KEY (slate_id, contest_id, build_key));
 CREATE TABLE IF NOT EXISTS warroom_tags (
     slate_id TEXT, source_file TEXT, player TEXT, name_key TEXT, tag TEXT,
     cap_min REAL, cap_max REAL, dfs_id INTEGER);
 """
 
+# Re-importing a slate replaces these. season_results is kept: it's the running record.
 SLATE_TABLES = ["files", "players", "player_results", "dk_pool", "entries", "lineups",
                 "contests", "standings_players", "payouts", "warroom_tags"]
 

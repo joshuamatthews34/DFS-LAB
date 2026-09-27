@@ -28,6 +28,10 @@ CLASSIC_PLAYERS = [
 ]
 CLASSIC_LINEUP = [1001, 1004, 1007, 1002, 1005, 1006, 1003, 1011, 1010]
 
+# DK's "Game Info": DAL@NYG kicks off at 1:00, SEA@ARI at 4:25 (the late game).
+GAME_INFO = {"DAL": "DAL@NYG 09/14/2026 01:00PM ET", "NYG": "DAL@NYG 09/14/2026 01:00PM ET",
+             "SEA": "SEA@ARI 09/14/2026 04:25PM ET", "ARI": "SEA@ARI 09/14/2026 04:25PM ET"}
+
 
 def sabersim_csv(path, players, blend=True, actuals=True, backslash=True, drop=()):
     extra = ["dk_std", "FD ID", "FD Salary"]
@@ -68,7 +72,7 @@ def dk_entries_csv(path, fmt, entries, pool, reservations=1, fee="$3"):
              ["Position", "Name + ID", "Name", "ID", "Roster Position", "Salary", "Game Info", "TeamAbbrev",
               "AvgPointsPerGame"]]
     right += [[p["pos"], f"{p['name']} ({p['id']})", p["name"], p["id"], p["roster"], p["salary"],
-               "DAL@NYG 09/14/2026 01:00PM ET", p["team"], 10] for p in pool]
+               GAME_INFO.get(p["team"], GAME_INFO["DAL"]), p["team"], 10] for p in pool]
     for i in range(max(len(left), len(right))):
         l = left[i] if i < len(left) else [""] * width
         r = right[i] if i < len(right) else []
@@ -128,3 +132,13 @@ def _csv_bytes(rows, bom=False, crlf=False):
 
 def _write_csv(path, rows, bom=False, crlf=False):
     path.write_bytes(_csv_bytes(rows, bom=bom, crlf=crlf))
+
+
+def lineups_csv(path, fmt, lineups, names):
+    """A lineup export (header = the roster slots, cells 'Name (id)'), e.g. DFS Army or a SaberSim fill."""
+    slots = {"classic": ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST"],
+             "showdown": ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"]}[fmt]
+    _write_csv(path, [slots, *[[f"{names[pid]} ({pid})" for pid in lu] for lu in lineups]])
+
+
+NAMES = {p[0]: p[1] for p in CLASSIC_PLAYERS}
