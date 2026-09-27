@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Your data stays on your computer, never in git (this repo is public)
+dfs_lab.db
+slates/*
+!slates/.gitkeep
