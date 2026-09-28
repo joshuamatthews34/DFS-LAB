@@ -153,7 +153,7 @@ def test_the_grader_sees_dfs_lab_builds(sd):
     keys = {k for k, _, _ in grade.available_sets("tnf")}
     assert "build:default" in keys
     meta = builds.load_meta("tnf")["build:default"]
-    assert (meta["name"], meta["method"]) == ("DFS Lab default", "DFS Lab default")
+    assert (meta["name"], meta["method"]) == ("DFS Lab default", "DFS Lab top by projection")
 
 
 # ---------------------------------------------------------------- classic

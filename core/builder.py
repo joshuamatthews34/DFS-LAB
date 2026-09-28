@@ -4,15 +4,21 @@
    each file and the time. The build reads only these copies.
 2. Candidates: thousands of optimal lineups, each for projections with random noise
    (~25% lognormal) or for one simulated slate. Lineup rules are built into the optimizer.
-3. Fill: fill method 2 (SPEC 5.3), top by projection with N unique players between lineups,
-   respecting min/max exposures, captain limits and the game coverage floor.
+3. Fill (SPEC 5.3), always respecting uniques, min/max exposures, captain limits and the game
+   coverage floor. Method 2 (default): top by projection. Method 1: top by simulated ROI against
+   a field model (SPEC 5.5) and the contest's payouts. Method 3: portfolio, each lineup added for
+   the most new simulated slates in which the set finishes top 1%.
 4. Checks: every lineup is checked against DraftKings' rules, and the guardrails (5.4) are reported.
 5. Export: a DraftKings entries CSV to upload by hand. DFS Lab never touches DraftKings.
 
-No hindsight (SPEC 7): Actual, Live Proj, FPTS, %Drafted and standings are never read.
+No hindsight (SPEC 7): Actual, Live Proj, FPTS, %Drafted and this slate's standings are never
+read. The one exception is asked for by name: a "real field" backtest reads the contest's real
+lineups, and the build is then marked hindsight. A synthetic field learns only salary and stacking
+habits from *other* slates' standings.
 """
 
 import contextlib
+import heapq
 import json
 import math
 import multiprocessing
@@ -30,8 +36,9 @@ import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
 from scipy.sparse import csr_matrix, vstack
 
-from . import builds, detect, legal, lateswap, rosters, sim, slate
+from . import builds, detect, fieldmodel, legal, lateswap, rosters, sim, simcontest, slate
 from .importers import entries as entries_imp
+from .importers import payouts as payouts_imp
 from .importers import sabersim as sabersim_imp
 from .importers import warroom as warroom_imp
 from .io_utils import FileProblem, sha256_file
@@ -43,6 +50,9 @@ LATE_KICKOFF_HOUR = 16                 # 4:05 / 4:25 ET games count as late
 MIN_POOL_PROJ = 0.5
 RESERVE_AT = 0.8                       # fill: protect a minimum once it needs 80% of the lineups left
 TOP_UP_ROUNDS = 3                      # extra candidate rounds when the fill comes up short
+URGENT_EVAL = 200                      # value fills: candidates scored when a minimum is urgent
+FILL_METHODS = {"projection": "top by projection", "roi": "top by simulated ROI",
+                "portfolio": "portfolio (top-1% chance)"}
 
 
 @dataclass
@@ -73,6 +83,14 @@ class BuildSettings:
     chalk_margin: float = 10.0         # ...and your exposure this many points above it
     allow_post_game_export: bool = False
     workers: int = None                # parallel solver processes (None = CPU count - 1)
+    fill: str = "projection"           # SPEC 5.3: "projection" (method 2), "roi" (1) or "portfolio" (3)
+    roi_contest: str = None            # contest whose payouts and field score lineups (None = most entries)
+    field_source: str = "synthetic"    # or "real": the contest's real lineups (backtests; marks hindsight)
+    contest_size: int = None           # entries in that contest (a synthetic field needs it for ROI)
+    entry_fee: float = None            # dollars, when the entries file doesn't say
+    fill_sims: int = 2000              # simulated slates for fill methods 1 and 3 and simulated results
+    field_sample: int = 20_000         # field lineups modeled
+    simulated_results: bool = True     # report simulated ROI and top-1% odds when a field can be modeled
 
     def floor(self, fmt):
         if self.salary_floor is not None:
@@ -94,6 +112,9 @@ class BuildResult:
     checks: dict = field(default_factory=dict)
     csv_path: str = None
     template: list = None              # Entry objects filled, in order
+    sim: dict = None                   # simulated results (or why they were skipped)
+    lineup_sim: pd.DataFrame = None    # per lineup: simulated top-1% chance and ROI
+    hindsight: bool = False            # used the contest's real field
 
     def lineup_ids(self):
         return [[int(self.pool.at[r, "dfs_id"]) for r in lu] for lu in self.lineups]
@@ -124,9 +145,15 @@ def make_snapshot(slate_id, name, allow_post_game=False, root=None):
         inputs.append(("dk_entries", parsed[detect.DK_ENTRIES][-1][1].path))
     if parsed[detect.WARROOM]:
         inputs.append(("warroom", parsed[detect.WARROOM][-1][1].path))
+    for _, det, _ in parsed[detect.PAYOUTS]:                 # typed in before lock
+        inputs.append(("payouts", det.path))
 
     stamp = datetime.now()
     folder = slate.slate_dir(slate_id, root) / "prelock" / f"{name}-{stamp:%Y%m%d-%H%M%S}"
+    for k in range(2, 1000):                                 # two builds in the same second
+        if not folder.exists():
+            break
+        folder = folder.with_name(f"{name}-{stamp:%Y%m%d-%H%M%S}-{k}")
     folder.mkdir(parents=True, exist_ok=False)
     files = []
     for role, src in inputs:
@@ -141,7 +168,8 @@ def make_snapshot(slate_id, name, allow_post_game=False, root=None):
 
 
 def read_snapshot(manifest):
-    """Parse the snapshot's copies. Post-game columns are dropped immediately."""
+    """Parse the snapshot's copies. Post-game columns are dropped immediately.
+    Returns players, the SaberSim data, entries, War Room tags and {contest ID: prizes in dollars}."""
     folder = Path(manifest["folder"])
     got = {f["role"]: folder / f["file"] for f in manifest["files"]}
     for f in manifest["files"]:
@@ -153,7 +181,21 @@ def read_snapshot(manifest):
     if "dk_entries" in got:
         ent = entries_imp.parse(got["dk_entries"], detect.detect(got["dk_entries"]).fmt)
     tags = warroom_imp.parse(got["warroom"]) if "warroom" in got else None
-    return players, ss, ent, tags
+    payouts = {}
+    for f in manifest["files"]:
+        if f["role"] == "payouts":
+            path = folder / f["file"]
+            cid = detect.detect(path).contest_id
+            payouts[cid] = prizes_from_table(payouts_imp.parse(path, cid))
+    return players, ss, ent, tags, payouts
+
+
+def prizes_from_table(table):
+    """rank_from, rank_to, prize_cents rows -> dollars for rank 1, 2, ... (last paid rank last)."""
+    prizes = np.zeros(int(table["rank_to"].max()))
+    for lo, hi, cents in table.itertuples(index=False):
+        prizes[lo - 1:hi] = cents / 100
+    return prizes
 
 
 # ---------------------------------------------------------------- 2. players and limits
@@ -416,18 +458,21 @@ def _ordered(lu, pool, fmt):
     return list(lu)
 
 
-# ---------------------------------------------------------------- 4. fill (SPEC 5.3 method 2)
+# ---------------------------------------------------------------- 4. fill (SPEC 5.3)
 
 class _Fill:
-    """Top by projection with N uniques (SPEC 5.3 method 2).
+    """Choose n lineups from the candidates (SPEC 5.3).
 
-    Lineups are taken best projection first while they respect the max exposures, captain
-    limits and uniques. Minimums (player and captain exposure, the game coverage floor) are
-    protected by reserving room: once the lineups left are only just enough to reach a minimum,
-    only lineups that help are taken.
+    Method 2 (no `value_factory`): best projection first. Methods 1 and 3: the lineup that adds
+    the most value to the set so far (simcontest.ROIValue / Top1Value), found lazily: a lineup's
+    value only shrinks as the set grows, so stale values are upper bounds.
+
+    Every method respects the max exposures, captain limits and uniques. Minimums (player and
+    captain exposure, the game coverage floor) are protected by reserving room: once the lineups
+    left are only just enough to reach a minimum, only lineups that help are taken.
     """
 
-    def __init__(self, cands, pool, base, fmt, n, s):
+    def __init__(self, cands, pool, base, fmt, n, s, value_factory=None):
         self.fmt, self.n, self.s = fmt, n, s
         proj = pool["proj"].to_numpy()
         order = sorted(range(len(cands)), key=lambda i: -proj[list(cands[i])].sum())
@@ -440,6 +485,12 @@ class _Fill:
             self.items = [frozenset((c, b) for b, c, _ in m) for m in self.members]
         else:
             self.items = [frozenset(b for b, _, _ in m) for m in self.members]
+        # Candidates x items (0/1), so overlaps with a newly chosen lineup take one matrix step.
+        vocab = {x: j for j, x in enumerate(sorted({x for it in self.items for x in it}, key=str))}
+        self.onehot = np.zeros((len(self.items), len(vocab)), dtype=np.float32)
+        for i, it in enumerate(self.items):
+            self.onehot[i, [vocab[x] for x in it]] = 1
+        self.sizes = self.onehot.sum(axis=1)
 
         limits = base.set_index("dfs_id")
         cap = lambda pct: math.floor(pct / 100 * n + 1e-9)   # noqa: E731
@@ -458,34 +509,32 @@ class _Fill:
                     if key in self.demand:
                         c[key] = c.get(key, 0) + 1
             self.contrib.append(c)
+        self.value = value_factory(self.cands) if value_factory else None
 
     def run(self):
         n = self.n
         chosen, dead = [], [False] * len(self.cands)
         p, c, have = {}, {}, {k: 0 for k in self.demand}
+        self.blocked = np.zeros(len(self.cands), dtype=bool)         # too few uniques vs a chosen lineup
+        heap = None
+        if self.value:
+            heap = [(-self.value.bound(i), -self.value.secondary(i), i) for i in range(len(self.cands))]
+            heapq.heapify(heap)
         while len(chosen) < n:
             remaining = n - len(chosen)
             # Start protecting a minimum a little early, while there's still room to choose.
             urgent = {k for k, need in self.demand.items() if need - have[k] >= RESERVE_AT * remaining}
-            best_partial, pick = None, None
-            for i, members in enumerate(self.members):
-                if dead[i]:
-                    continue
-                if not self._fits(i, members, chosen, p, c):
-                    dead[i] = True                           # caps and uniques only ever tighten
-                    continue
-                helps = sum(1 for k in urgent if self.contrib[i].get(k))
-                if helps == len(urgent):
-                    pick = i
-                    break
-                if best_partial is None or helps > best_partial[1]:
-                    best_partial = (i, helps)
-            if pick is None and best_partial is not None:
-                pick = best_partial[0]
+            if self.value:
+                pick = self._pick_value(heap, urgent, dead, chosen, p, c)
+            else:
+                pick = self._pick_order(urgent, dead, chosen, p, c)
             if pick is None:
                 break
             dead[pick] = True
             chosen.append(pick)
+            self.blocked |= self.sizes - self.onehot @ self.onehot[pick] < self.s.min_uniques - 1e-9
+            if self.value:
+                self.value.add(pick)
             for b, is_c, _ in self.members[pick]:
                 p[b] = p.get(b, 0) + 1
                 if is_c:
@@ -494,6 +543,61 @@ class _Fill:
                 have[k] += v
         chosen = self._repair(chosen)
         return [list(self.cands[i]) for i in chosen]
+
+    def _pick_order(self, urgent, dead, chosen, p, c):
+        """Method 2: the best-projected lineup that fits (and helps every urgent minimum)."""
+        best_partial = None
+        for i, members in enumerate(self.members):
+            if dead[i]:
+                continue
+            if not self._fits_now(i, members, p, c):
+                dead[i] = True                               # caps and uniques only ever tighten
+                continue
+            helps = sum(1 for k in urgent if self.contrib[i].get(k))
+            if helps == len(urgent):
+                return i
+            if best_partial is None or helps > best_partial[1]:
+                best_partial = (i, helps)
+        return best_partial[0] if best_partial else None
+
+    def _pick_value(self, heap, urgent, dead, chosen, p, c):
+        """Methods 1 and 3: the lineup that adds the most value (lazy greedy)."""
+        v = self.value
+        if urgent:
+            feasible = []
+            for i, members in enumerate(self.members):
+                if dead[i]:
+                    continue
+                if not self._fits_now(i, members, p, c):
+                    dead[i] = True
+                    continue
+                feasible.append((sum(1 for k in urgent if self.contrib[i].get(k)), i))
+            if not feasible:
+                return None
+            most = max(h for h, _ in feasible)
+            group = sorted((i for h, i in feasible if h == most), key=lambda i: (-v.bound(i), i))[:URGENT_EVAL]
+            return max(group, key=lambda i: (v.exact(i), v.secondary(i), -i))
+        if hasattr(v, "order"):                                  # cheap to score every candidate at once
+            for i in v.order():
+                if dead[i]:
+                    continue
+                if not self._fits_now(i, self.members[i], p, c):
+                    dead[i] = True
+                    continue
+                return int(i)
+            return None
+        while heap:
+            _, _, i = heapq.heappop(heap)
+            if dead[i]:
+                continue
+            if not self._fits_now(i, self.members[i], p, c):
+                dead[i] = True
+                continue
+            key = (-v.exact(i), -v.secondary(i), i)
+            if not heap or key <= heap[0]:
+                return i
+            heapq.heappush(heap, key)
+        return None
 
     def _counts(self, chosen):
         p, c, have = {}, {}, {k: 0 for k in self.demand}
@@ -532,6 +636,17 @@ class _Fill:
             if not swapped:
                 break
         return chosen
+
+    def _fits_now(self, i, members, p, c):
+        """_fits for the lineups chosen so far in run(), with uniques read from self.blocked."""
+        if self.blocked[i]:
+            return False
+        for b, is_c, _ in members:
+            if p.get(b, 0) + 1 > self.max_p.get(b, self.n):
+                return False
+            if is_c and c.get(b, 0) + 1 > self.max_c.get(b, self.n):
+                return False
+        return True
 
     def _fits(self, i, members, chosen, p, c):
         for b, is_c, _ in members:
@@ -605,8 +720,10 @@ def targeted(pool, base, fmt, s, n):
 
 def build(slate_id, s=None, root=None, progress=None):
     s = s or BuildSettings()
+    if s.fill not in FILL_METHODS:
+        raise FileProblem(f"Unknown fill method '{s.fill}'. Pick one of: {', '.join(FILL_METHODS)}.")
     manifest = make_snapshot(slate_id, s.name, s.allow_post_game_export, root)
-    players, ss, ent, tags = read_snapshot(manifest)
+    players, ss, ent, tags, payouts = read_snapshot(manifest)
     base, fmt, warnings = prepare(players, ss, ent, tags, s)
     warnings = manifest["warnings"] + warnings
 
@@ -623,12 +740,22 @@ def build(slate_id, s=None, root=None, progress=None):
     n = len(template) if template else s.n_lineups
 
     pool = pool_rows(base, players, fmt)
+    scoring, skipped = None, None
+    if s.fill != "projection" or s.simulated_results:
+        try:
+            scoring = Scoring.setup(slate_id, players, base, fmt, template, ent, payouts, s, root, progress)
+        except FileProblem as e:
+            if s.fill != "projection":
+                raise
+            skipped = str(e)
+    factory = scoring.value_factory(pool, s.fill) if scoring and s.fill != "projection" else None
+
     if progress:
         progress(f"Optimizing {s.pool_size:,} candidate lineups...")
     cands = candidates(pool, base, fmt, s, n)
     if progress:
-        progress(f"Choosing {n} lineups from {len(cands):,} distinct candidates...")
-    chosen = _Fill(cands, pool, base, fmt, n, s).run()
+        progress(f"Choosing {n} lineups from {len(cands):,} distinct candidates ({FILL_METHODS[s.fill]})...")
+    chosen = _Fill(cands, pool, base, fmt, n, s, factory).run()
     for round_no in range(1, TOP_UP_ROUNDS + 1):
         if len(chosen) >= n:
             break
@@ -640,13 +767,137 @@ def build(slate_id, s=None, root=None, progress=None):
                            blocked=blocked, with_targeted=False)
         known = {_identity(lu, pool, fmt) for lu in cands}
         cands += [lu for lu in extra if _identity(lu, pool, fmt) not in known]
-        chosen = _Fill(cands, pool, base, fmt, n, s).run()
+        chosen = _Fill(cands, pool, base, fmt, n, s, factory).run()
     result = BuildResult(slate_id, s, fmt, chosen, pool, base, manifest, len(cands), warnings, template=template)
     check(result)
     if template:
         result.template = template[:len(chosen)]
+    if scoring:
+        if progress:
+            progress("Simulating the build against the field...")
+        result.sim, result.lineup_sim = scoring.report(pool, chosen, s)
+        result.hindsight = scoring.field.source == "real"
+        if result.hindsight:
+            result.warnings += scoring.field.notes
+    else:
+        result.sim = {"skipped": skipped} if skipped else None
     save(result, root)
     return result
+
+
+class Scoring:
+    """The simulated contest a build is scored in: one set of simulated slates, the field model
+    (SPEC 5.5) and the contest's terms (payouts, entries, fee)."""
+
+    def __init__(self, terms, field, simulation, cents, scorer, notes):
+        self.terms, self.field, self.simulation, self.scorer, self.notes = terms, field, simulation, scorer, notes
+        self.col, self.cents = simulation.column_of(), cents
+
+    @classmethod
+    def setup(cls, slate_id, players, base, fmt, template, ent, payouts, s, root=None, progress=None):
+        say = progress or (lambda _: None)
+        terms = contest_terms(template, ent, payouts, s)
+        if s.fill == "roi":
+            missing = []
+            if terms.contest_id is None:
+                missing.append("a contest to score against")
+            elif terms.prizes is None:
+                missing.append(f"a payout file for contest {terms.contest_id} (payouts-{terms.contest_id}.csv)")
+            if terms.fee is None:
+                missing.append("the entry fee")
+            if s.field_source != "real" and not s.contest_size:
+                missing.append("the contest size (entries)")
+            if missing:
+                raise FileProblem("Top by simulated ROI needs " + ", ".join(missing) + ".")
+        if s.field_source == "real":
+            if terms.contest_id is None:
+                raise FileProblem("Pick the contest whose real field to use.")
+            say(f"Reading contest {terms.contest_id}'s real field (backtest)...")
+            fp = fieldmodel.field_players(players, base, fmt, need_ownership=False)
+            fld = fieldmodel.real_field(slate_id, terms.contest_id, fp, fmt, s.field_sample, s.seed, root)
+            terms.size = fld.size
+        else:
+            say("Learning the field's salary and stacking habits from past standings...")
+            habits = fieldmodel.learn_habits(fmt, slate_id, root)
+            fp = fieldmodel.field_players(players, base, fmt)
+            terms.size = s.contest_size or None
+            size = min(s.field_sample, terms.size) if terms.size else s.field_sample
+            say(f"Drawing a {size:,}-lineup field from projected ownership...")
+            fld = fieldmodel.synthetic_field(fp, fmt, habits, size, s.seed)
+            fld.size = terms.size
+        proj = base.set_index("dfs_id")["proj"]
+        fproj = fp["base_id"].map(proj).fillna(0.0).to_numpy() * fp["mult"].to_numpy()
+        fld.info["field_avg_proj"] = round(float(fproj[fld.rows].sum(axis=1).mean()), 2)
+        say(f"Simulating {s.fill_sims:,} slates for the field and your lineups...")
+        settings = sim.SimSettings.saved(root)
+        settings.n_sims, settings.seed = s.fill_sims, s.seed + 7   # not the candidates' noise
+        simulation = sim.simulate_frame(slate_id, base, fmt, settings)
+        col = simulation.column_of()
+        cents = simcontest.player_cents(simulation.points)
+        fcol = np.array([col[int(b)] for b in fp["base_id"]])
+        fmult = np.rint(2 * fp["mult"].to_numpy()).astype(np.int32)
+        scorer = simcontest.Scorer(cents, fcol[fld.rows], fmult[fld.rows], terms, terms.size)
+        return cls(terms, fld, simulation, cents, scorer, list(fld.notes))
+
+    def lineup_scores(self, pool, lineups):
+        """Half-hundredth scores (lineups x sims) for lineups of pool rows (all the same size)."""
+        rows = np.array([list(lu) for lu in lineups], dtype=np.int64)
+        col = np.array([self.col[int(b)] for b in pool["base_id"]])
+        mult = np.rint(2 * pool["mult"].to_numpy()).astype(np.int32)
+        return simcontest.score(self.cents, col[rows], mult[rows])
+
+    def value_factory(self, pool, fill):
+        kind = simcontest.ROIValue if fill == "roi" else simcontest.Top1Value
+        return lambda cands: kind(self.scorer, self.lineup_scores(pool, cands))
+
+    def report(self, pool, chosen, s):
+        t, f = self.terms, self.field
+        rep = {"fill": s.fill, "contest": t.contest_id, "contest_name": t.name, "field": f.source,
+               "field_lineups": len(f.rows), "contest_size": t.size, "fee": t.fee, "sims": s.fill_sims,
+               "notes": self.notes, **{k: v for k, v in f.info.items() if k != "sha256"}}
+        if f.source == "real":
+            rep["standings_sha256"] = f.info.get("sha256")
+        if not chosen:
+            return rep, None
+        ev = self.scorer.evaluate(self.lineup_scores(pool, chosen))
+        rep["build_avg_proj"] = round(float(np.mean([pool.loc[list(lu), "proj"].sum() for lu in chosen])), 2)
+        rep["set_top1_chance"] = round(100 * ev["any_top1"], 1)
+        rep["avg_top1_rate"] = round(100 * float(ev["top1"].mean()), 2)
+        per = pd.DataFrame({"Sim top 1% %": np.round(100 * ev["top1"], 2)})
+        if "ev" in ev:
+            fees = t.fee * len(chosen)
+            won = float(ev["ev"].sum())
+            rep.update(expected_winnings=round(won, 2), fees=round(fees, 2),
+                       roi=round((won - fees) / fees, 4) if fees else None,
+                       cash_rate=round(100 * float(ev["cash"].mean()), 1))
+            per["Sim ROI %"] = np.round(100 * (ev["ev"] / t.fee - 1), 1) if t.fee else np.nan
+        elif t.prizes is None:
+            rep["roi_note"] = "No simulated ROI: there's no payout file for this contest."
+        elif t.fee is None:
+            rep["roi_note"] = "No simulated ROI: the entry fee isn't known."
+        else:
+            rep["roi_note"] = "No simulated ROI: enter the contest size (entries)."
+        return rep, per
+
+
+def contest_terms(template, ent, payouts, s):
+    """The contest lineups are scored against: ID, name, fee and payouts (size comes later).
+    Default: the contest with the most entries being filled. Name and fee come from the whole
+    entries file, since you can score against a contest you aren't filling."""
+    cid = str(s.roi_contest) if s.roi_contest else None
+    if cid is None and template:
+        cid = pd.Series([e.contest_id for e in template]).value_counts().index[0]
+    if cid is None and len(payouts) == 1:
+        cid = next(iter(payouts))
+    name, fee = "", s.entry_fee
+    if ent is not None:
+        mine = [e for e in ent.all_entries if e.contest_id == cid]
+        if mine:
+            name = mine[0].contest_name
+            fees = pd.Series([e.fee_cents for e in mine]).dropna()
+            if fee is None and len(fees):
+                fee = float(fees.value_counts().index[0]) / 100
+    return simcontest.ContestTerms(cid, name, None, fee, payouts.get(cid) if cid else None)
 
 
 def check(r):
@@ -762,14 +1013,19 @@ def save(r, root=None):
         "late_game_haircut_used": bool(r.settings.late_haircut), "snapshot": r.snapshot,
         "candidates": r.candidates, "checks": r.checks, "warnings": r.warnings, "csv": r.csv_path,
         "contests": sorted({e.contest_id for e in r.template}) if r.template else [],
+        "fill_method": FILL_METHODS[r.settings.fill], "simulated": r.sim, "hindsight": r.hindsight,
     }
     (folder / f"{stem}.json").write_text(json.dumps(record, indent=2, default=str))
     meta = builds.load_meta(r.slate_id, root)
     key = f"build:{r.settings.name}"
     old = meta.get(key, {})
+    method = old.get("method") or ""
+    if not method or method.startswith("DFS Lab"):                # ours to keep up to date
+        method = f"DFS Lab {FILL_METHODS[r.settings.fill]}"
     meta[key] = {**builds.DEFAULT, **old, "name": old.get("name") or f"DFS Lab {r.settings.name}",
-                 "method": old.get("method") or f"DFS Lab {r.settings.name}",
-                 "refill": bool(r.snapshot.get("post_game_export")) or old.get("refill", False)}
+                 "method": method,
+                 "refill": bool(r.snapshot.get("post_game_export")) or old.get("refill", False),
+                 "hindsight": r.hindsight}                           # set by this build's own inputs
     builds.save_meta(r.slate_id, meta, root)
 
 

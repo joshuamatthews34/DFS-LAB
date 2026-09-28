@@ -14,6 +14,8 @@
   python -m core.cli simulate 2026-wk03-main [--sims 10000] [--seed 2026]
   python -m core.cli correlations [--refresh]
   python -m core.cli build 2026-wk03-tnf [--name default] [--contest ID ...] [--lineups 150] [--pool 5000]
+        [--fill projection|roi|portfolio] [--score-contest ID] [--field synthetic|real] [--contest-size N]
+        [--entry-fee 20] [--fill-sims 2000] [--field-sample 20000] [--no-sim]
 
 Exits with status 1 when the report lists problems.
 """
@@ -86,6 +88,16 @@ def main(argv=None):
     bd.add_argument("--salary-floor", type=int)
     bd.add_argument("--uniques", type=int, default=2)
     bd.add_argument("--post-game-ok", action="store_true", help="allow building from a post-game export")
+    bd.add_argument("--fill", choices=list(builder.FILL_METHODS), default="projection",
+                    help="projection (method 2), roi (method 1) or portfolio (method 3)")
+    bd.add_argument("--score-contest", help="contest whose payouts and field score lineups (default: most entries)")
+    bd.add_argument("--field", choices=["synthetic", "real"], default="synthetic",
+                    help="real = the contest's real lineups (backtests only; marks the build hindsight)")
+    bd.add_argument("--contest-size", type=int, help="entries in that contest (synthetic field)")
+    bd.add_argument("--entry-fee", type=float, help="dollars, if the entries file doesn't say")
+    bd.add_argument("--fill-sims", type=int, default=2000)
+    bd.add_argument("--field-sample", type=int, default=20_000)
+    bd.add_argument("--no-sim", action="store_true", help="skip the simulated results for a projection fill")
     args = ap.parse_args(argv)
 
     try:
@@ -166,7 +178,11 @@ def main(argv=None):
             s = builder.BuildSettings(name=args.name, contests=args.contests, n_lineups=args.lineups,
                                       pool_size=args.pool, noise=args.noise, seed=args.seed,
                                       salary_floor=args.salary_floor, min_uniques=args.uniques,
-                                      allow_post_game_export=args.post_game_ok)
+                                      allow_post_game_export=args.post_game_ok, fill=args.fill,
+                                      roi_contest=args.score_contest, field_source=args.field,
+                                      contest_size=args.contest_size, entry_fee=args.entry_fee,
+                                      fill_sims=args.fill_sims, field_sample=args.field_sample,
+                                      simulated_results=not args.no_sim)
             r = builder.build(args.slate, s, progress=print)
             c = r.checks
             print(f"{c['lineups']} of {c['target']} lineups, {c['legal']} legal, {c['duplicates']} duplicates, "
@@ -175,6 +191,7 @@ def main(argv=None):
             for w in r.warnings + [f"Chalk: {x}" for x in c["chalk"]]:
                 print(f"! {w}")
             print(ownership.summary_text(r, ownership.history(r.fmt)))
+            print(simulated_text(r.sim))
             print(f"Upload file: {r.csv_path}")
             return 0 if c["legal"] == c["lineups"] else 1
         if args.cmd == "import":
@@ -191,6 +208,24 @@ def main(argv=None):
         return 1
     print(report.to_text())
     return 0 if report.ok else 1
+
+
+def simulated_text(sim):
+    if not sim:
+        return "Simulated results: off."
+    if "skipped" in sim:
+        return f"Simulated results skipped: {sim['skipped']}"
+    lines = [f"Simulated contest {sim['contest']} ({sim['field']} field, {sim['field_lineups']:,} lineups, "
+             f"{sim['sims']:,} slates): chance of 1+ top-1% finish {sim['set_top1_chance']}%, "
+             f"avg lineup top-1% rate {sim['avg_top1_rate']}%"]
+    if "roi" in sim:
+        lines.append(f"  simulated ROI {100 * sim['roi']:+.1f}% (expected winnings ${sim['expected_winnings']:,.2f} "
+                     f"on ${sim['fees']:,.2f} of fees), cash rate {sim['cash_rate']}%")
+    else:
+        lines.append(f"  {sim.get('roi_note', '')}")
+    lines.append(f"  field's average projection {sim.get('field_avg_proj')} vs your build's {sim.get('build_avg_proj')}")
+    lines += [f"  {n}" for n in sim.get("notes", [])]
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

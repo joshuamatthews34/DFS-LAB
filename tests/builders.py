@@ -37,7 +37,9 @@ GAME_INFO = {"DAL": "DAL@NYG 09/14/2026 01:00PM ET", "NYG": "DAL@NYG 09/14/2026 
 PERCENTILE_SHAPE = {25: 0.6, 50: 0.9, 75: 1.3, 85: 1.55, 95: 2.0, 99: 2.6}
 
 
-def sabersim_csv(path, players, blend=True, actuals=True, backslash=True, drop=()):
+def sabersim_csv(path, players, blend=True, actuals=True, backslash=True, drop=(), own=None):
+    """own: optional {DFS ID: projected ownership %} (default 10.5 for everyone)."""
+    own = own or {}
     extra = ["dk_std", "FD ID", "FD Salary"]
     header = [c for c in REQUIRED if c not in drop] + extra
     out = [[("Saber\\ Total" if backslash and c == "Saber Total" else c) for c in header]]
@@ -46,7 +48,7 @@ def sabersim_csv(path, players, blend=True, actuals=True, backslash=True, drop=(
             "DFS ID": pid, "Name": name, "Pos": pos, "Team": team, "Opp": opp, "Status": "",
             "Salary": sal, "Actual": act if actuals else "", "SS Proj": ss,
             "Live Proj": act if actuals else "", "My Proj": my if blend else ss, "Value": round(ss / sal * 1000, 2),
-            "My Own": 10.5, "Adj Own": 11.0, "Min Exp": 0, "Max Exp": 100, "Saber Team": 24.5,
+            "My Own": own.get(pid, 10.5), "Adj Own": 11.0, "Min Exp": 0, "Max Exp": 100, "Saber Team": 24.5,
             "Saber Total": 47.5, "dk_points": ss, "dk_std": 7.1, "FD ID": "x", "FD Salary": 1,
         }
         for p, mult in PERCENTILE_SHAPE.items():

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+import builders as b
 from core import slate
 
 APP = str(Path(__file__).resolve().parents[1] / "app" / "app.py")
@@ -73,3 +74,31 @@ def test_build_screen(home, downloads):
     assert not at.exception
     assert at.header[0].value == "20 of 20 lineups built"
     assert any("All 20 lineups are legal" in s.value for s in at.success)
+
+
+def test_build_screen_portfolio_with_simulated_results(home, downloads, tmp_path):
+    import test_builder as tb
+    import test_fill_methods as tf
+    d = tmp_path / "past"
+    d.mkdir()
+    b.sabersim_csv(d / "ss.csv", b.showdown_players(tb.SHOWDOWN))
+    tf._standings(d / f"contest-standings-{tf.PAST}.zip", tf.PAST, tf._nearly_full_lineups(tb.SHOWDOWN, 300))
+    slate.import_files("past-sd", [d / "ss.csv", d / f"contest-standings-{tf.PAST}.zip"])
+    files = tb._showdown_slate(downloads)
+    b.sabersim_csv(files[0], b.showdown_players(tb.SHOWDOWN), actuals=False, own=tf._own(tb.SHOWDOWN))
+    pay = downloads / f"payouts-{tb.CONTEST}.csv"
+    b.payouts_csv(pay, [[1, 1, "$500"], [2, 30, "$10"]])
+    slate.import_files("tnf", files + [pay])
+
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    at.sidebar.radio[0].set_value("Build lineups").run()
+    [r for r in at.radio if r.label.startswith("How to choose")][0].set_value("portfolio").run()
+    [n for n in at.number_input if n.label == "Candidate lineups to optimize"][0].set_value(500).run()
+    [n for n in at.number_input if n.label == "Simulated slates"][0].set_value(300).run()
+    [n for n in at.number_input if n.label == "Field lineups to model"][0].set_value(1000).run()
+    [n for n in at.number_input if n.label == "Contest size (entries)"][0].set_value(1000).run()
+    [b_ for b_ in at.button if b_.label == "Build"][0].click().run()
+    assert not at.exception
+    assert at.header[0].value == "20 of 20 lineups built"
+    labels = [m.label for m in at.metric]
+    assert "Simulated ROI" in labels and "Chance of 1+ top-1% finish" in labels

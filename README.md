@@ -212,17 +212,21 @@ uses that export's projections and warns that they may include news from after l
 ## Building lineups (the Build lineups screen)
 
 1. Import the slate's **pre-lock SaberSim export** (with My Proj loaded), your **DKEntries** file (so
-   DFS Lab knows which entries to fill), and your **War Room tags** if you have them.
-2. Pick the slate, name the build (e.g. `default`), and pick the contests to fill.
+   DFS Lab knows which entries to fill), and your **War Room tags** if you have them. For simulated
+   ROI, also the contest's **payout file**.
+2. Pick the slate, name the build (e.g. `default`), pick the contests to fill, and pick how to
+   choose the lineups (the fill method; "Top by projection" is the default).
 3. Adjust anything you want (every setting has a sensible default), then click **Build**.
 4. Check the results, then click **Download the DraftKings upload file** and upload it in
    DraftKings' entry editor yourself.
 
 What it does:
 
-- **Pre-lock snapshot:** the SaberSim export, entries file and War Room tags are copied into
-  `slates/<slate>/prelock/<build>-<time>/` with a fingerprint (hash) of each and the time. The
-  build reads only those copies. Actual scores, FPTS, ownership and standings are never read.
+- **Pre-lock snapshot:** the SaberSim export, entries file, War Room tags and payout files are
+  copied into `slates/<slate>/prelock/<build>-<time>/` with a fingerprint (hash) of each and the
+  time. The build reads only those copies. Actual scores, FPTS, actual ownership and this slate's
+  standings are never read (the one exception is a "real field" backtest, below, which is marked
+  hindsight).
 - **Candidates:** thousands of optimal lineups (5,000 by default), each for projections with
   ~25% random noise, or for one simulated slate. Players with a max exposure are left out of
   candidates in proportion, so the pool already fits your limits.
@@ -237,8 +241,17 @@ What it does:
   (core 15–25%, favorite's QB 7–12%, secondary 7–25%, other QB 0–5%) or exact captain limits.
 - **Late-game ownership haircut:** optional and off by default. It cuts the projected ownership of
   4:05/4:25 players (the field late-swaps off them). Every build records whether it was used.
-- **Filling:** top by projection with your unique-players rule, keeping every min/max, captain
-  limit and the game coverage floor. If something can't be met, it says so rather than hiding it.
+- **Filling (pick one of three methods):**
+  - **Top by projection** (the default): the best-projected lineups, with your unique-players rule.
+  - **Top by simulated ROI:** the lineups that add the most expected prize money in simulated
+    contests (see "Simulated contests" below). Your own lineups compete with each other, so a
+    lineup that would mostly knock one of yours down a spot adds little. Needs the contest's
+    payout file and its size (entries).
+  - **Portfolio:** each lineup is added for the most *new* simulated slates in which at least one
+    of your lineups finishes top 1%, so the set spreads out over different ways the game can go.
+
+  Every method keeps your unique-players rule, every min/max, captain limit and the game coverage
+  floor. If something can't be met, it says so rather than hiding it.
 - **Checks:** every lineup is checked against DraftKings' rules. Then the guardrails:
   - **chalk warning:** your exposure is 10+ points above a 20%+ projected-owned player;
   - **game coverage table;**
@@ -254,6 +267,70 @@ snapshot is flagged on the Compare screen.
 
 If a slate only has a post-game SaberSim export, you can still build (tick the box), but that
 build is marked as a **refill**: its projections may include news from after lock.
+
+### Simulated contests (the "Field model and simulated results" section)
+
+DFS Lab plays your lineups against a model of the field in thousands of simulated slates (2,000
+by default), with the simulator from Milestone 4. It uses them for the ROI and portfolio methods,
+and shows the results for every build:
+
+- **Simulated ROI**, expected winnings and cash rate (only with the contest's payout file);
+- **chance of at least one top-1% finish**, and each lineup's own top-1% rate;
+- a **Sim ROI %** and **Sim top 1% %** column in the lineup list.
+
+**The field.** Pick the contest to score against, then the field:
+
+- **Synthetic** (the normal choice): 20,000 field lineups drawn from SaberSim's projected
+  ownership (`My Own`), so each player shows up in the field about as often as projected. The
+  lineups are then shaped to spend salary and stack like real fields did, which DFS Lab learns from
+  the **standings files of your other slates** of the same type (classic or showdown). So you
+  need at least one past contest's standings, with that slate's SaberSim export, imported as its
+  own slate. It never uses this slate's own standings.
+- **Real lineups from the standings (backtest):** for a past slate, DFS Lab can use the
+  contest's real lineups instead. Those weren't known before lock, so the build is marked
+  **hindsight** and left out of method comparisons.
+
+Each field lineup stands for (contest size ÷ 20,000) real entries, and tied lineups split the
+prize, including ties with duplicates in the field.
+
+**Read the simulated numbers with care.** The build page shows the field's average projection next
+to your build's. A field made from ownership alone is usually weaker than a real one, so
+simulated ROI tends to look too good. What the simulations are good for is **comparing your own
+options** on the same simulated slates. Before believing a simulated edge, check the grades
+against real fields.
+
+---
+
+## Milestone 6 check: fill methods and simulated ROI
+
+1. Slate `2026-wk03-tnf` (from the earlier checks) needs:
+   - the **pre-lock** SaberSim export (with `My Own` ownership);
+   - your **DKEntries** file;
+   - the **mini-MAX standings** zip (contest 195943225);
+   - the mini-MAX **payout table**, typed in as `payouts-195943225.csv` (see "Payout files"
+     below);
+   - your **DFS Army v4** lineup file, re-run **without** the Hooper and Sturdivant minimums you
+     added after the game, with `v4` in its file name. Then, on the Compare builds screen, label
+     it **refill**.
+2. At least **one other showdown slate** with its standings zip and SaberSim export, imported as
+   its own slate (any past showdown you played). DFS Lab learns the showdown field's salary and
+   stacking habits from it.
+3. In Terminal:
+
+   ```
+   DFS_LAB_GOLDEN=1 ./run.sh test tests/test_golden_m6.py -v -s
+   ```
+
+   It builds the mini-MAX entries three ways (top by projection, portfolio, top by simulated ROI),
+   prints each build's simulated results, then grades all of them against the **real** mini-MAX
+   field, next to your entered lineups and DFS Army v4.
+4. **Pass** = `PASSED`, and a table with one row per build: top 1% / 5% / 20% counts, best rank,
+   cashes and ROI. That table is the answer to "do DFS Lab's methods beat what I entered?" for
+   this one slate. One slate proves little (the p-values warning says why), so the Season screen
+   is where this adds up.
+
+No other showdown slate yet? `DFS_LAB_M6_FIELD=real` in front of the command uses the mini-MAX's
+own lineups as the field. Those builds are marked hindsight, so treat that table as a demo.
 
 ---
 
@@ -293,7 +370,8 @@ rank_from,rank_to,prize
 3,5,$1000
 ```
 
-Without a payout file, ROI shows as "not available". It is never estimated.
+Without a payout file, ROI shows as "not available". It is never estimated. The builder's
+simulated ROI needs one too, typed in before lock from the contest page.
 
 ---
 
@@ -324,6 +402,8 @@ None of this goes into git. This repository is public, so your contest files sta
 ./run.sh simulate 2026-wk03-main                # simulate a slate
 ./run.sh correlations [--refresh]               # the correlation estimates
 ./run.sh build 2026-wk03-tnf --name default     # build lineups and write the DraftKings file
+./run.sh build 2026-wk03-tnf --name roi --fill roi --contest-size 237812   # fill by simulated ROI
+./run.sh build 2026-wk03-tnf --name port --fill portfolio                  # portfolio fill
 ./run.sh test                                  # run the automated checks
 ```
 

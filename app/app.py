@@ -17,8 +17,8 @@ st.set_page_config(page_title="DFS Lab", page_icon="🧪", layout="wide")
 st.sidebar.title("DFS Lab")
 screen = st.sidebar.radio("Screen", ["Import files", "Slate reports", "Grade lineups", "Compare builds",
                                      "Late swap", "Season", "Simulator", "Build lineups"])
-st.sidebar.caption("Milestones 1-5: import and check files, grade lineups, compare builds, grade late swaps, "
-                   "simulate slates, build lineups.")
+st.sidebar.caption("Milestones 1-6: import and check files, grade lineups, compare builds, grade late swaps, "
+                   "simulate slates, build lineups (three fill methods, simulated ROI).")
 
 
 def _size_kb(path):
@@ -201,6 +201,17 @@ def build_screen(sid):
         s.n_lineups = int(c[1].number_input("Lineups", 1, 500, 150))
         st.caption("No entries file with entries in this slate, so DFS Lab writes a plain lineup file.")
 
+    s.fill = st.radio("How to choose the lineups (fill method)", list(builder.FILL_METHODS), horizontal=True,
+                      format_func={"projection": "Top by projection (default)", "roi": "Top by simulated ROI",
+                                   "portfolio": "Portfolio: best chance of a top-1% finish"}.get)
+    st.caption({"projection": "The best-projected lineups, with the unique players you set between them.",
+                "roi": "The lineups that add the most expected prize money in simulated contests against a "
+                       "modeled field, counting that your own lineups compete with each other. Needs the "
+                       "contest's payout file and size.",
+                "portfolio": "Each lineup is added for the most new simulated slates in which at least one of "
+                             "your lineups finishes top 1%."}[s.fill])
+    field_options(sid, parsed, ent, s)
+
     with st.expander("Lineup rules"):
         c = st.columns(3)
         s.salary_floor = int(c[0].number_input("Salary floor", 0, 50_000, s.floor(fmt), 100))
@@ -279,6 +290,87 @@ def build_screen(sid):
         show_build(st.session_state["built"])
 
 
+def field_options(sid, parsed, ent, s):
+    """The contest lineups are scored against and the field model (SPEC 5.5)."""
+    names, counts = {}, {}
+    if ent is not None:
+        for e in ent.all_entries:
+            names.setdefault(e.contest_id, e.contest_name)
+            counts[e.contest_id] = counts.get(e.contest_id, 0) + 1
+    for _, det, _ in parsed[detect.PAYOUTS]:
+        names.setdefault(det.contest_id, "")
+    report = slate.load_report(sid)
+    sizes = {str(c["contest_id"]): c["entries"] for c in (report.contests if report else [])}
+    with st.expander("Field model and simulated results", expanded=s.fill != "projection"):
+        if not names:
+            st.caption("No contests in this slate's entries or payout files. The portfolio method and the "
+                       "simulated results still work with a synthetic field; simulated ROI needs a payout file.")
+        choices = sorted(names, key=lambda x: -counts.get(x, 0))
+        c = st.columns(3)
+        if choices:
+            s.roi_contest = c[0].selectbox("Score against contest", choices,
+                                           format_func=lambda x: f"{names[x] or 'contest'} ({x})")
+        pays = {det.contest_id for _, det, _ in parsed[detect.PAYOUTS]}
+        if s.roi_contest:
+            c[0].caption("Payout file loaded." if s.roi_contest in pays else
+                         f"No payout file for this contest (payouts-{s.roi_contest}.csv), so no simulated ROI.")
+        real_ok = s.roi_contest in sizes
+        s.field_source = c[1].radio("Field", ["synthetic", "real"] if real_ok else ["synthetic"],
+                                    format_func={"synthetic": "Synthetic (from projected ownership)",
+                                                 "real": "Real lineups from the standings (backtest)"}.get)
+        if s.field_source == "real":
+            c[1].warning("Uses the contest's real lineups, which weren't known before lock. The build is marked "
+                         "hindsight and left out of method comparisons.")
+        else:
+            c[1].caption("Salary and stacking habits come from other slates' standings files.")
+        size = c[2].number_input("Contest size (entries)", 0, 10_000_000, int(sizes.get(s.roi_contest, 0)),
+                                 help="Shown on the DraftKings contest page. Needed for simulated ROI with a "
+                                      "synthetic field.", disabled=s.field_source == "real")
+        s.contest_size = int(size) or None
+        fee_known = ent is not None and any(e.contest_id == s.roi_contest and e.fee_cents for e in ent.all_entries)
+        if not fee_known:
+            fee = c[2].number_input("Entry fee ($)", 0.0, 100_000.0, 0.0, 1.0)
+            s.entry_fee = fee or None
+        c = st.columns(3)
+        s.fill_sims = int(c[0].number_input("Simulated slates", 200, 10_000, 2_000, 100))
+        s.field_sample = int(c[1].number_input("Field lineups to model", 1_000, 100_000, 20_000, 1_000))
+        s.simulated_results = c[2].checkbox("Show simulated results for every build", True,
+                                            help="Adds about half a minute. Skipped with a note when there's no "
+                                                 "field to model.")
+
+
+def show_simulated(r):
+    sim = r.sim
+    if not sim:
+        return
+    if "skipped" in sim:
+        st.info(f"Simulated results skipped: {sim['skipped']}")
+        return
+    st.markdown("**Simulated contest**")
+    size = f"{sim['contest_size']:,} entries" if sim.get("contest_size") else "an unknown number of entries"
+    field = "the contest's real lineups (backtest)" if sim["field"] == "real" else "a synthetic field"
+    st.caption(f"{sim['sims']:,} simulated slates, against {field} of {sim['field_lineups']:,} lineups standing for "
+               f"{size} in {sim['contest_name'] or 'contest ' + str(sim['contest'])}. Your lineups compete with each "
+               f"other, and ties split prizes.")
+    m = st.columns(5)
+    if "roi" in sim:
+        m[0].metric("Simulated ROI", f"{100 * sim['roi']:+.1f}%")
+        m[1].metric(f"Expected winnings (fees ${sim['fees']:,.0f})", f"${sim['expected_winnings']:,.0f}")
+        m[2].metric("Cash rate", f"{sim['cash_rate']}%")
+    else:
+        m[0].caption(sim.get("roi_note", ""))
+    m[3].metric("Chance of 1+ top-1% finish", f"{sim['set_top1_chance']}%")
+    m[4].metric("Avg lineup top-1% rate", f"{sim['avg_top1_rate']}%")
+    st.caption(f"Field's average projection {sim.get('field_avg_proj')} vs your build's {sim.get('build_avg_proj')}. "
+               f"A field that projects much lower than real fields do makes simulated ROI look too good; "
+               f"check simulated results against real grades before trusting them.")
+    if sim["field"] == "synthetic":
+        st.caption(f"Field ownership is within {sim.get('ownership_miss')} points of projected ownership on "
+                   f"average. Habits from: {'; '.join(sim.get('habits_from', []))}.")
+    for n in sim.get("notes", []):
+        st.caption(n)
+
+
 def show_build(r):
     c = r.checks
     st.header(f"{c['lineups']} of {c['target']} lineups built")
@@ -296,6 +388,7 @@ def show_build(r):
     for w in c["chalk"]:
         st.warning(f"Chalk: {w}")
     st.info(ownership.summary_text(r, ownership.history(r.fmt)))
+    show_simulated(r)
     with open(r.csv_path, "rb") as f:
         st.download_button("Download the DraftKings upload file", f.read(), file_name=f"DKEntries-dfslab-{r.settings.name}.csv",
                            mime="text/csv", type="primary")
@@ -308,11 +401,14 @@ def show_build(r):
     st.markdown("**Lineups**")
     names = r.pool["name"].to_dict()
     slots = r.pool["slot"].to_dict()
-    st.dataframe(pd.DataFrame([{
+    table = pd.DataFrame([{
         "#": i + 1, "Proj": round(float(r.pool.loc[lu, "proj"].sum()), 2),
         "Salary": int(r.pool.loc[lu, "salary"].sum()), "Proj own %": round(float(r.pool.loc[lu, "own"].sum()), 1),
         "Players": " / ".join(("CPT " if slots[x] == "CPT" else "") + names[x] for x in lu),
-    } for i, lu in enumerate(r.lineups)]), hide_index=True, width="stretch")
+    } for i, lu in enumerate(r.lineups)])
+    if r.lineup_sim is not None and len(r.lineup_sim) == len(table):
+        table = pd.concat([table.iloc[:, :4], r.lineup_sim.reset_index(drop=True), table[["Players"]]], axis=1)
+    st.dataframe(table, hide_index=True, width="stretch")
 
 
 if screen == "Import files":
