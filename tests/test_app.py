@@ -60,3 +60,16 @@ def test_simulator_screen(home, classic_slate):
     sim_button = [b for b in at.button if b.label == "Simulate"][0]
     sim_button.click().run()
     assert not at.exception
+
+
+def test_build_screen(home, downloads):
+    import test_builder as tb
+    slate.import_files("tnf", tb._showdown_slate(downloads))
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    at.sidebar.radio[0].set_value("Build lineups").run()
+    assert not at.exception
+    [n for n in at.number_input if n.label == "Candidate lineups to optimize"][0].set_value(500).run()
+    [b for b in at.button if b.label == "Build"][0].click().run()
+    assert not at.exception
+    assert at.header[0].value == "20 of 20 lineups built"
+    assert any("All 20 lineups are legal" in s.value for s in at.success)

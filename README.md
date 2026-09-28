@@ -2,8 +2,8 @@
 
 Your own lineup lab for DraftKings NFL, built from [SPEC.md](SPEC.md) one milestone at a time.
 
-**Status:** Milestones 1–4 are built: import and check files, the grader, the comparison screen and
-late-swap grader, and the simulator. Next up: Milestone 5 (the builder).
+**Status:** Milestones 1–5 are built: import and check files, the grader, the comparison screen and
+late-swap grader, the simulator, and the builder. Next up: Milestone 6 (fill methods and simulated ROI).
 
 ---
 
@@ -192,6 +192,71 @@ uses that export's projections and warns that they may include news from after l
 
 ---
 
+## Milestone 5 check: the builder
+
+1. Make sure the Week 3 TNF ATL@GB showdown is imported as `2026-wk03-tnf` with its **DraftKings
+   entries file** and the **pre-lock** SaberSim export (the post-game export works for this check).
+2. In Terminal:
+
+   ```
+   DFS_LAB_GOLDEN=1 ./run.sh test tests/test_golden_m5.py -v -s
+   ```
+
+   It builds lineups for every entry and checks each one against DraftKings' own player pool from
+   your entries file: real IDs, captain IDs in the CPT column, both teams, under the $50,000 cap, no
+   player twice, and your Entry IDs.
+3. It prints the path of the upload file. **Upload that file in DraftKings' entry editor yourself.**
+   **Pass** = the test says `PASSED` and DraftKings accepts the file without errors. (You don't have
+   to keep the lineups.)
+
+## Building lineups (the Build lineups screen)
+
+1. Import the slate's **pre-lock SaberSim export** (with My Proj loaded), your **DKEntries** file (so
+   DFS Lab knows which entries to fill), and your **War Room tags** if you have them.
+2. Pick the slate, name the build (e.g. `default`), and pick the contests to fill.
+3. Adjust anything you want (every setting has a sensible default), then click **Build**.
+4. Check the results, then click **Download the DraftKings upload file** and upload it in
+   DraftKings' entry editor yourself.
+
+What it does:
+
+- **Pre-lock snapshot:** the SaberSim export, entries file and War Room tags are copied into
+  `slates/<slate>/prelock/<build>-<time>/` with a fingerprint (hash) of each and the time. The
+  build reads only those copies. Actual scores, FPTS, ownership and standings are never read.
+- **Candidates:** thousands of optimal lineups (5,000 by default), each for projections with
+  ~25% random noise, or for one simulated slate. Players with a max exposure are left out of
+  candidates in proportion, so the pool already fits your limits.
+- **Rules you can set:** salary floor (showdown default $48,000), unique players between
+  lineups (default 2), max total projected ownership. Stacking: classic QB + N of his WR/TEs
+  with an optional bring-back; in showdown a QB captain gets one of his WR/TEs. At most one K and
+  one DST in showdown. Game coverage floor (classic: games with a 44+ total get at least 0.5
+  players per lineup).
+- **Exposure limits:** War Room tags turn into max exposures: OVER = projected ownership × 1.5,
+  WITH × 1.0, UNDER × 0.6, FADE = 3% max. These are untested starting points you can change, and
+  every build records the rules it used. You can also set any player's min/max, and captain tiers
+  (core 15–25%, favorite's QB 7–12%, secondary 7–25%, other QB 0–5%) or exact captain limits.
+- **Late-game ownership haircut:** optional and off by default. It cuts the projected ownership of
+  4:05/4:25 players (the field late-swaps off them). Every build records whether it was used.
+- **Filling:** top by projection with your unique-players rule, keeping every min/max, captain
+  limit and the game coverage floor. If something can't be met, it says so rather than hiding it.
+- **Checks:** every lineup is checked against DraftKings' rules. Then the guardrails:
+  - **chalk warning:** your exposure is 10+ points above a 20%+ projected-owned player;
+  - **game coverage table;**
+  - **ownership check:** the build's average total projected ownership and sub-5% players, against
+    what your past contests' top-1% lineups had.
+- **The file:** `slates/<slate>/builds/dfslab-<name>.csv`, in DraftKings' entries format with your
+  Entry IDs. In classic, the FLEX slot holds a late-game player when possible, for late swap. If
+  the slate has no entries file, it writes plain lineups to upload as new lineups instead.
+
+Builds show up as lineup sets everywhere else ("DFS Lab build: default"), so you can grade and
+compare them after the games. A DFS Lab build whose projections no longer match its pre-lock
+snapshot is flagged on the Compare screen.
+
+If a slate only has a post-game SaberSim export, you can still build (tick the box), but that
+build is marked as a **refill**: its projections may include news from after lock.
+
+---
+
 ## What the report tells you
 
 | Line | Meaning |
@@ -258,6 +323,7 @@ None of this goes into git. This repository is public, so your contest files sta
 ./run.sh calibrate [--save]                     # calibration table; --save uses the fitted tail widths
 ./run.sh simulate 2026-wk03-main                # simulate a slate
 ./run.sh correlations [--refresh]               # the correlation estimates
+./run.sh build 2026-wk03-tnf --name default     # build lineups and write the DraftKings file
 ./run.sh test                                  # run the automated checks
 ```
 
@@ -272,6 +338,6 @@ DFS_LAB_WEEK2_DIR=~/Downloads/week2 ./run.sh test tests/test_m1_week2_check.py
 ## Not built yet
 
 - Codex captain caps: SPEC 3.6 doesn't give the file layout yet, so there's no importer for them.
-- Player pairings (6.3); the builder, fill methods and simulated ROI (Milestones 5–6).
-- Flagging a build whose pre-lock projection doesn't match the pre-lock snapshot (section 7): the
-  snapshot is created at build time, which arrives with the builder in Milestone 5.
+- Player pairings (6.3); fill methods 1 and 3 (top by simulated ROI, portfolio) and the field model
+  (Milestone 6); the season tracker (Milestone 7).
+- Codex captain tiers are set by hand on the Build screen until the Codex file layout is known.

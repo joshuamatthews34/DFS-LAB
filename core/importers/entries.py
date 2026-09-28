@@ -37,10 +37,16 @@ class Entry:
 @dataclass
 class EntriesData:
     fmt: str
-    entries: list
+    entries: list                      # entries with a full lineup
     reservations: int = 0
     pool: pd.DataFrame = None
     warnings: list = field(default_factory=list)
+    reserved: list = field(default_factory=list)   # blank entries (Entry objects with no players)
+
+    @property
+    def all_entries(self):
+        """Every entry in the file, filled or blank: what an upload file can fill."""
+        return self.entries + self.reserved
 
 
 def parse(path, fmt):
@@ -65,6 +71,11 @@ def parse(path, fmt):
             raise FileProblem(f"Entries file row {line_no}: lineup cell '{e}' has no DFS ID.") from None
         if all(i is None for i in ids):
             data.reservations += 1
+            try:
+                fee = parse_money_cents(row[3])
+            except ValueError:
+                fee = None
+            data.reserved.append(Entry(entry_id, row[2].strip(), row[1].strip(), fee, []))
             continue
         if any(i is None for i in ids):
             incomplete.append(entry_id)

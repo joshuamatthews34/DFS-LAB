@@ -9,16 +9,16 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core import (builds, calibration, compare, correlations, detect, grade, lateswap, settings,  # noqa: E402
-                  sim, slate)
+from core import (builder, builds, calibration, compare, correlations, detect, grade, lateswap,  # noqa: E402
+                  ownership, rosters, settings, sim, slate)
 from core.io_utils import FileProblem  # noqa: E402
 
 st.set_page_config(page_title="DFS Lab", page_icon="🧪", layout="wide")
 st.sidebar.title("DFS Lab")
 screen = st.sidebar.radio("Screen", ["Import files", "Slate reports", "Grade lineups", "Compare builds",
-                                     "Late swap", "Season", "Simulator"])
-st.sidebar.caption("Milestones 1-4: import and check files, grade lineups, compare builds, grade late swaps, "
-                   "simulate slates.")
+                                     "Late swap", "Season", "Simulator", "Build lineups"])
+st.sidebar.caption("Milestones 1-5: import and check files, grade lineups, compare builds, grade late swaps, "
+                   "simulate slates, build lineups.")
 
 
 def _size_kb(path):
@@ -169,6 +169,150 @@ def show_comparison(c):
     st.warning(compare.STATS_WARNING)
     if c.recorded:
         st.caption(f"{c.recorded} named build(s) saved to the Season view.")
+
+
+def build_screen(sid):
+    parsed = slate.load_parsed(sid)
+    exports = parsed[detect.SABERSIM]
+    pre = [x for x in exports if not x[2].has_actuals]
+    if not exports:
+        st.info("Import this slate's pre-lock SaberSim export first.")
+        return
+    allow_post = False
+    if pre:
+        st.caption(f"Projections from the pre-lock export {pre[-1][0].name}. It's copied into a pre-lock snapshot "
+                   f"when you build.")
+    else:
+        st.warning("This slate only has a post-game SaberSim export. Building from it risks hindsight; the build "
+                   "is marked as a refill.")
+        allow_post = st.checkbox("Use the post-game export's projections anyway")
+    fmt = (pre or exports)[-1][2].fmt
+
+    s = builder.BuildSettings()
+    c = st.columns([2, 1])
+    s.name = c[0].text_input("Build name", "default", help="Saved as builds/dfslab-<name>.csv")
+    ent = parsed[detect.DK_ENTRIES][-1][2] if parsed[detect.DK_ENTRIES] else None
+    if ent is not None and ent.all_entries:
+        counts = pd.Series([e.contest_id for e in ent.all_entries]).value_counts()
+        names = {e.contest_id: e.contest_name for e in ent.all_entries}
+        s.contests = c[1].multiselect("Contests to fill", list(counts.index), default=list(counts.index),
+                                      format_func=lambda x: f"{names[x]} ({counts[x]} entries)")
+    else:
+        s.n_lineups = int(c[1].number_input("Lineups", 1, 500, 150))
+        st.caption("No entries file with entries in this slate, so DFS Lab writes a plain lineup file.")
+
+    with st.expander("Lineup rules"):
+        c = st.columns(3)
+        s.salary_floor = int(c[0].number_input("Salary floor", 0, 50_000, s.floor(fmt), 100))
+        s.min_uniques = int(c[1].number_input("Unique players between lineups", 1, 9, 2))
+        cap = c[2].number_input("Max total projected ownership (0 = off)", 0.0, 900.0, 0.0, 5.0)
+        s.max_total_own = cap or None
+        if fmt == rosters.SHOWDOWN:
+            s.qb_captain_passcatcher = st.checkbox("A QB captain needs one of his WR/TEs", True)
+            s.one_k_one_dst = st.checkbox("At most one K and one DST", True)
+        else:
+            c = st.columns(3)
+            s.stack_passcatchers = int(c[0].number_input("QB + at least this many of his WR/TEs", 0, 4, 1))
+            s.bring_back = c[1].checkbox("Bring-back (an opponent from the QB's game)")
+            s.coverage_floor = c[2].checkbox("Game coverage floor", True)
+            if s.coverage_floor:
+                c = st.columns(2)
+                s.coverage_total = c[0].number_input("Games with a total of at least", 30.0, 70.0, 44.0, 0.5)
+                s.coverage_per_lineup = c[1].number_input("get at least this many players per lineup", 0.0, 3.0,
+                                                          0.5, 0.1)
+    with st.expander("Candidates"):
+        c = st.columns(3)
+        s.pool_size = int(c[0].number_input("Candidate lineups to optimize", 500, 20_000, 5_000, 500))
+        s.noise = c[1].radio("Noise", ["lognormal", "simulations"],
+                             format_func={"lognormal": "~25% random noise on projections",
+                                          "simulations": "One simulated slate per candidate"}.get)
+        s.seed = int(c[2].number_input("Random seed", 0, 10**9, 2026))
+        st.caption("Classic with 5,000 candidates takes a few minutes; showdown well under a minute.")
+    with st.expander("War Room rules and late-game ownership"):
+        st.caption("Max exposure from a War Room tag = projected ownership x the multiplier. These are untested "
+                   "starting points (SPEC 5.2). Each build records the rules it used.")
+        c = st.columns(4)
+        s.warroom_rules = {"OVER": c[0].number_input("OVER x", 0.0, 5.0, 1.5, 0.1),
+                           "WITH": c[1].number_input("WITH x", 0.0, 5.0, 1.0, 0.1),
+                           "UNDER": c[2].number_input("UNDER x", 0.0, 5.0, 0.6, 0.1),
+                           "FADE_MAX": c[3].number_input("FADE max %", 0.0, 10.0, 3.0, 0.5)}
+        if st.checkbox("Late-game ownership haircut (off by default)"):
+            s.late_haircut = st.slider("Cut projected ownership of 4:05/4:25 players by", 0.05, 0.8, 0.4, 0.05)
+
+    with st.expander("Player limits (optional)"):
+        ss = (pre or exports)[-1][2]
+        players = ss.players
+        tags = parsed[detect.WARROOM][-1][2] if parsed[detect.WARROOM] else None
+        base, _, _ = builder.prepare(players, ss, ent, tags, s)
+        base = base[base["proj"] >= builder.MIN_POOL_PROJ].sort_values("proj", ascending=False)
+        table = pd.DataFrame({"dfs_id": base["dfs_id"], "Player": base["name"], "Pos": base["pos"],
+                              "Team": base["team"], "Salary": base["salary"], "Proj": base["proj"],
+                              "Proj own %": base["own"].round(1), "War Room": base["tag"],
+                              "Rule max %": base["max_exp"].round(1), "Min %": None, "Max %": None})
+        if fmt == rosters.SHOWDOWN:
+            table["CPT tier"] = None
+        cfg = {"dfs_id": None, "Min %": st.column_config.NumberColumn(min_value=0, max_value=100),
+               "Max %": st.column_config.NumberColumn(min_value=0, max_value=100)}
+        if fmt == rosters.SHOWDOWN:
+            cfg["CPT tier"] = st.column_config.SelectboxColumn(options=list(builder.CAPTAIN_TIERS))
+            st.caption("Captain tiers: " + "; ".join(f"{k} {a}-{b}%" for k, (a, b) in builder.CAPTAIN_TIERS.items()))
+        edited = st.data_editor(table, hide_index=True, width="stretch", column_config=cfg,
+                                disabled=["Player", "Pos", "Team", "Salary", "Proj", "Proj own %", "War Room",
+                                          "Rule max %"], key=f"limits-{sid}")
+        for row in edited.to_dict("records"):
+            lo, hi = row["Min %"], row["Max %"]
+            if pd.notna(lo) or pd.notna(hi):
+                s.exposures[str(row["dfs_id"])] = [float(lo) if pd.notna(lo) else 0.0,
+                                                   float(hi) if pd.notna(hi) else float(row["Rule max %"])]
+            if fmt == rosters.SHOWDOWN and row.get("CPT tier"):
+                s.captain_tiers[str(row["dfs_id"])] = row["CPT tier"]
+    s.allow_post_game_export = allow_post
+
+    if st.button("Build", type="primary", disabled=not (pre or allow_post)):
+        try:
+            with st.status("Building...", expanded=True) as status:
+                st.session_state["built"] = builder.build(sid, s, progress=status.write)
+                status.update(label="Built", state="complete")
+        except FileProblem as e:
+            st.error(str(e))
+    if "built" in st.session_state and st.session_state["built"].slate_id == sid:
+        show_build(st.session_state["built"])
+
+
+def show_build(r):
+    c = r.checks
+    st.header(f"{c['lineups']} of {c['target']} lineups built")
+    if c["legal"] == c["lineups"] and not c["duplicates"]:
+        st.success(f"All {c['lineups']} lineups are legal DraftKings lineups, with no duplicates.")
+    else:
+        st.error(f"{len(c['illegal'])} illegal lineup(s), {c['duplicates']} duplicate(s): " + "; ".join(c["illegal"][:5]))
+    m = st.columns(4)
+    m[0].metric("Avg projection", c["avg_proj"])
+    m[1].metric("Avg salary", f"${c['avg_salary']:,.0f}")
+    m[2].metric("Avg projected ownership", f"{c['avg_own']}%")
+    m[3].metric("Candidates", f"{r.candidates:,}")
+    for w in r.warnings:
+        st.warning(w)
+    for w in c["chalk"]:
+        st.warning(f"Chalk: {w}")
+    st.info(ownership.summary_text(r, ownership.history(r.fmt)))
+    with open(r.csv_path, "rb") as f:
+        st.download_button("Download the DraftKings upload file", f.read(), file_name=f"DKEntries-dfslab-{r.settings.name}.csv",
+                           mime="text/csv", type="primary")
+    st.caption(f"Also saved as {r.csv_path}. Upload it in DraftKings' entry editor yourself.")
+    st.markdown("**Exposure**")
+    st.dataframe(builder.exposure_table(r), hide_index=True, width="stretch")
+    if c["coverage"]:
+        st.markdown("**Game coverage**")
+        st.dataframe(pd.DataFrame(c["coverage"]), hide_index=True, width="stretch")
+    st.markdown("**Lineups**")
+    names = r.pool["name"].to_dict()
+    slots = r.pool["slot"].to_dict()
+    st.dataframe(pd.DataFrame([{
+        "#": i + 1, "Proj": round(float(r.pool.loc[lu, "proj"].sum()), 2),
+        "Salary": int(r.pool.loc[lu, "salary"].sum()), "Proj own %": round(float(r.pool.loc[lu, "own"].sum()), 1),
+        "Players": " / ".join(("CPT " if slots[x] == "CPT" else "") + names[x] for x in lu),
+    } for i, lu in enumerate(r.lineups)]), hide_index=True, width="stretch")
 
 
 if screen == "Import files":
@@ -405,6 +549,14 @@ elif screen == "Simulator":
                     st.warning(w)
                 st.caption(f"{result.settings.n_sims:,} simulated slates from {result.source_file}.")
                 st.dataframe(result.summary(), hide_index=True, width="stretch")
+
+elif screen == "Build lineups":
+    st.title("Build lineups")
+    st.write("DFS Lab's own builder. It writes a DraftKings upload file; you upload it yourself. "
+             "DFS Lab never logs in to or touches DraftKings.")
+    sid = pick_slate()
+    if sid:
+        build_screen(sid)
 
 else:
     st.title("Slate reports")

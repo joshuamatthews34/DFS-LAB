@@ -45,7 +45,7 @@ class LineupSet:
                                                               self.fees)])
 
 
-def lineup_sets(parsed):
+def lineup_sets(parsed, slate_id=None, root=None):
     sets = []
     entry_files = parsed[detect.DK_ENTRIES]
     if len(entry_files) > 1:
@@ -65,7 +65,32 @@ def lineup_sets(parsed):
         n = len(d.lineups)
         sets.append(LineupSet(f"lineups:{fr.name}", f"{fr.name} (lineup file)", d.fmt, d.lineups,
                               [None] * n, [None] * n, [None] * n))
+    if slate_id:
+        sets += dfslab_sets(slate_id, root)
     return sets
+
+
+def dfslab_sets(slate_id, root=None):
+    """DFS Lab's own builds (slates/<slate>/builds/dfslab-*.csv). They weren't necessarily entered,
+    so their Entry IDs are not treated as official; the contest is kept for the entry fee."""
+    from .importers import entries as entries_imp
+    from .importers import lineups as lineups_imp
+    out = []
+    folder = slate.slate_dir(slate_id, root) / "builds"
+    for path in sorted(folder.glob("dfslab-*.csv")) if folder.exists() else []:
+        det = detect.detect(path)
+        name = path.stem.removeprefix("dfslab-")
+        if det.kind == detect.DK_ENTRIES:
+            d = entries_imp.parse(path, det.fmt)
+            es = d.entries
+            out.append(LineupSet(f"build:{name}", f"DFS Lab build: {name}", d.fmt, [e.player_ids for e in es],
+                                 [None] * len(es), [e.contest_id for e in es], [e.fee_cents for e in es]))
+        elif det.kind == detect.LINEUPS:
+            d = lineups_imp.parse(path, det.fmt)
+            n = len(d.lineups)
+            out.append(LineupSet(f"build:{name}", f"DFS Lab build: {name}", d.fmt, d.lineups,
+                                 [None] * n, [None] * n, [None] * n))
+    return out
 
 
 ENTERED_KEY = "entered:standings"
@@ -78,7 +103,7 @@ def available_sets(slate_id, root=None):
     out = []
     if parsed[detect.DK_ENTRIES] and list_contests(slate_id, root):
         out.append((ENTERED_KEY, ENTERED_LABEL, None))
-    out += [(s.key, s.label, len(s.lineups)) for s in lineup_sets(parsed)]
+    out += [(s.key, s.label, len(s.lineups)) for s in lineup_sets(parsed, slate_id, root)]
     return out
 
 
@@ -130,7 +155,7 @@ def entered_set(slate_id, parsed, book, root=None):
 
 def resolve_sets(slate_id, keys, parsed, book, root=None):
     """The lineup sets named by `keys`, plus problems found while reading the entered set."""
-    all_sets = {s.key: s for s in lineup_sets(parsed)}
+    all_sets = {s.key: s for s in lineup_sets(parsed, slate_id, root)}
     problems = {}
     if ENTERED_KEY in keys:
         all_sets[ENTERED_KEY], problems[ENTERED_KEY] = entered_set(slate_id, parsed, book, root)
@@ -321,7 +346,8 @@ def grade(slate_id, contest_id, set_keys=None, only_contest=False, root=None, sa
     tags = _warroom_tags(parsed)
     field_points = dict(zip(fld.entries["entry_id"], fld.entries["points"]))
 
-    keys = set_keys or ([ENTERED_KEY] if parsed[detect.DK_ENTRIES] else []) + [s.key for s in lineup_sets(parsed)]
+    keys = set_keys or ([ENTERED_KEY] if parsed[detect.DK_ENTRIES] else []) + \
+        [s.key for s in lineup_sets(parsed, slate_id, root)]
     sets, set_problems = resolve_sets(slate_id, keys, parsed, book, root)
 
     grades = []

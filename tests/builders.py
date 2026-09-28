@@ -146,3 +146,25 @@ def lineups_csv(path, fmt, lineups, names):
 
 
 NAMES = {p[0]: p[1] for p in CLASSIC_PLAYERS}
+
+
+def synthetic_players(games=(("DAL", "NYG"), ("SEA", "ARI")), seed=0, kickers=False, salary_scale=1.0,
+                      start_id=2001):
+    """A fuller fake slate: per team 2 QB, 3 RB, 5 WR, 2 TE, a DST (and a K). Deterministic."""
+    import random
+    rng = random.Random(seed)
+    layout = [("QB", 2, (5000, 7600), (9, 22)), ("RB", 3, (4000, 8600), (4, 17)), ("WR", 5, (3000, 8900), (3, 18)),
+              ("TE", 2, (2500, 6100), (2, 11)), ("DST", 1, (2000, 3600), (4, 8))]
+    if kickers:
+        layout.append(("K", 1, (3500, 4600), (5, 9)))
+    out, pid = [], start_id
+    for home, away in games:
+        for team, opp in ((home, away), (away, home)):
+            for pos, count, (slo, shi), (plo, phi) in layout:
+                for i in range(count):
+                    salary = int(rng.randrange(slo, shi, 100) * salary_scale) // 100 * 100
+                    proj = round(rng.uniform(plo, phi) / (1 + 0.6 * i), 1)
+                    name = team if pos == "DST" else f"{team} {pos}{i + 1}"
+                    out.append((pid, name, pos, team, opp, salary, proj, proj, round(proj * rng.uniform(0.3, 1.8), 2)))
+                    pid += 1
+    return out

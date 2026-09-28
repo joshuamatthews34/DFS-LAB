@@ -13,6 +13,7 @@
   python -m core.cli calibrate [--slate SLATE ...] [--min-proj 5] [--save]
   python -m core.cli simulate 2026-wk03-main [--sims 10000] [--seed 2026]
   python -m core.cli correlations [--refresh]
+  python -m core.cli build 2026-wk03-tnf [--name default] [--contest ID ...] [--lineups 150] [--pool 5000]
 
 Exits with status 1 when the report lists problems.
 """
@@ -22,7 +23,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import builds, calibration, compare, correlations, detect, grade, lateswap, settings, sim, slate
+from . import (builder, builds, calibration, compare, correlations, detect, grade, lateswap, ownership, settings,
+               sim, slate)
 from .io_utils import FileProblem
 
 
@@ -73,6 +75,17 @@ def main(argv=None):
     sm.add_argument("--seed", type=int)
     co = sub.add_parser("correlations", help="show (or re-estimate) the nflverse correlations")
     co.add_argument("--refresh", action="store_true", help="download nflverse 2021-2025 and re-estimate")
+    bd = sub.add_parser("build", help="build DFS Lab lineups and write a DraftKings upload file")
+    bd.add_argument("slate")
+    bd.add_argument("--name", default="default")
+    bd.add_argument("--contest", action="append", dest="contests", help="contest ID to fill (default: all)")
+    bd.add_argument("--lineups", type=int, default=150, help="when there's no entries file")
+    bd.add_argument("--pool", type=int, default=5000, help="candidate lineups to optimize")
+    bd.add_argument("--noise", choices=["lognormal", "simulations"], default="lognormal")
+    bd.add_argument("--seed", type=int, default=2026)
+    bd.add_argument("--salary-floor", type=int)
+    bd.add_argument("--uniques", type=int, default=2)
+    bd.add_argument("--post-game-ok", action="store_true", help="allow building from a post-game export")
     args = ap.parse_args(argv)
 
     try:
@@ -149,6 +162,21 @@ def main(argv=None):
                   f"{data['team_weeks']:,} team-weeks, estimated {data['estimated_on']}")
             print(correlations.table(data).to_string(index=False))
             return 0
+        if args.cmd == "build":
+            s = builder.BuildSettings(name=args.name, contests=args.contests, n_lineups=args.lineups,
+                                      pool_size=args.pool, noise=args.noise, seed=args.seed,
+                                      salary_floor=args.salary_floor, min_uniques=args.uniques,
+                                      allow_post_game_export=args.post_game_ok)
+            r = builder.build(args.slate, s, progress=print)
+            c = r.checks
+            print(f"{c['lineups']} of {c['target']} lineups, {c['legal']} legal, {c['duplicates']} duplicates, "
+                  f"avg projection {c['avg_proj']}, avg salary ${c['avg_salary']:,.0f}, "
+                  f"avg projected ownership {c['avg_own']}%")
+            for w in r.warnings + [f"Chalk: {x}" for x in c["chalk"]]:
+                print(f"! {w}")
+            print(ownership.summary_text(r, ownership.history(r.fmt)))
+            print(f"Upload file: {r.csv_path}")
+            return 0 if c["legal"] == c["lineups"] else 1
         if args.cmd == "import":
             report = slate.import_files(args.slate, args.files)
         elif args.cmd == "recheck":

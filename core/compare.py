@@ -50,6 +50,7 @@ def compare(slate_id, contest_id, keys, only_contest=False, include_hindsight=Fa
     if not info.prelock_proj:
         warnings.append(f"Projection averages come from the post-game SaberSim export ({info.proj_file}) because "
                         f"the slate has no pre-lock export, so they may include news from after lock.")
+    warnings += _snapshot_flags(slate_id, grades, root)
     labels = {k: lbl for k, lbl, _ in grade.available_sets(slate_id, root)}
     names = [builds.label_for(g.key, g.label if g.key not in labels else labels[g.key], meta) for g in grades]
     names = _unique(names)
@@ -65,6 +66,24 @@ def compare(slate_id, contest_id, keys, only_contest=False, include_hindsight=Fa
     if record:
         comp.recorded = builds.record(slate_id, info, grades, meta, root)
     return comp
+
+
+def _snapshot_flags(slate_id, grades, root=None):
+    """SPEC 7: a DFS Lab build whose pre-lock projection doesn't match today's export gets flagged."""
+    from . import builder
+    out = []
+    for g in grades:
+        if not g.key.startswith("build:") or not g.summary:
+            continue
+        try:
+            record = builder.load_record(slate_id, g.key.split(":", 1)[1], root)
+        except FileNotFoundError:
+            continue
+        then, now = record["checks"].get("avg_proj"), g.summary.get("avg_proj")
+        if then is not None and now is not None and abs(then - now) > 0.1:
+            out.append(f"{g.label}: its projection average was {then} in its pre-lock snapshot but is {now} with "
+                       f"the slate's current SaberSim export. The inputs changed after the build.")
+    return out
 
 
 def _unique(names):

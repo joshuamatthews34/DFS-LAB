@@ -167,6 +167,13 @@ def load_players(slate_id, root=None):
 def simulate(slate_id, sim_settings=None, root=None, corr=None):
     s = sim_settings or SimSettings.saved(root)
     df, fmt, source, warnings = load_players(slate_id, root)
+    return simulate_frame(slate_id, df, fmt, s, source, warnings, corr)
+
+
+def simulate_frame(slate_id, df, fmt, s, source="", warnings=None, corr=None):
+    """Simulate a given pre-lock player table (one row per player, no captain rows)."""
+    warnings = list(warnings or [])
+    df = df.drop(columns=[c for c in POST_GAME_COLUMNS if c in df.columns]).reset_index(drop=True)
     df = assign_roles(df)
     table = correlations.lookup(corr)
 
